@@ -47,3 +47,24 @@ test('ALLOW là hằng đóng băng, deny sinh đủ bốn khoá', () => {
   const d = deny('infra.deny-binary', 'vì sao', 'làm gì');
   assert.deepEqual(Object.keys(d).sort(), ['decision', 'hint', 'reason', 'ruleId']);
 });
+
+test('normalizePath với home Windows không còn chứa backslash', () => {
+  const winHome = 'C:\\Users\\Duong';
+  const result = normalizePath('~/x', winHome);
+  assert.equal(result, 'C:/Users/Duong/x');
+  assert.equal(result.includes('\\'), false);
+});
+
+test('globToRegExp với home Windows khớp đúng path đã normalize', () => {
+  const winHome = 'C:\\Users\\Duong';
+  const pattern = globToRegExp('~/.aws/credentials', winHome);
+  const path = normalizePath('C:\\Users\\Duong\\.aws\\credentials', winHome);
+  assert.ok(pattern.test(path), 'pattern should match normalized windows path');
+});
+
+test('home chứa escape sequence nguy hiểm (\\d) phải khớp literal', () => {
+  const winHomeWithDangerousSeq = 'C:\\dev';
+  const pattern = globToRegExp('~/**/*.env', winHomeWithDangerousSeq);
+  const path = normalizePath('C:\\dev\\app\\.env', winHomeWithDangerousSeq);
+  assert.ok(pattern.test(path), 'regex should match literal path, not interpret \\d as digit class');
+});
