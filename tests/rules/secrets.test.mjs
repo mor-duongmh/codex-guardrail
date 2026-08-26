@@ -367,3 +367,113 @@ test('`~/.ssh/*.pub` chỉ phủ một tầng, không đệ quy', () => {
   const r = evaluate(shell('cat ~/.ssh/backup/id_rsa.pub'), P);
   assert.equal(r.decision, 'deny', 'cat ~/.ssh/backup/id_rsa.pub');
 });
+
+// ---------------------------------------------------------------------------
+// Round 3: `~/.kube/config` và `~/.docker/config.json` là pattern ĐÚNG-Y (không
+// có `**`), nên MỌI biến thể thêm hậu tố lọt: `config.bak`, `config.old`,
+// `config.json.bak`. Đã đo trên policy trước khi sửa: cả ba `allow`.
+//
+// Vì sao đáng sửa: `cp ~/.kube/config ~/.kube/config.bak` là việc người ta làm
+// trước khi đổi context, và bản sao chứa ĐÚNG cert + token cluster như bản gốc.
+// Chặn bản gốc mà để lọt bản sao là bảo vệ 0 thứ. Cùng LỚP lỗi với bug
+// `.map(globToRegExp)`: một denyPath không phủ đúng thứ nó tồn tại để phủ.
+//
+// Pattern đã chọn, sau khi đo 1460 ca:
+//   `~/.kube/**`            — cả thư mục là credential store, đồng dạng với
+//                             `~/.aws/**` / `~/.config/gcloud/**` / `~/.ssh/**`.
+//   `~/.docker/config.json*` — CHỈ nới hậu tố. `~/.docker/**` bị cấm bởi test
+//                             `cat ~/.docker/daemon.json` phải allow, và đo
+//                             thực tế `~/.docker` có bin/, buildx/,
+//                             cli-plugins/, contexts/, models/, run/ — không
+//                             có gì là credential ngoài `config.json`.
+//
+// Vì sao KHÔNG thu `~/.kube/**` về `~/.kube/config*`: đã đo, `config*` để lọt
+// `~/.kube/kubeconfig-staging`, `~/.kube/prod.yaml`, `~/.kube/configs/prod.yaml`
+// — kubeconfig tên tuỳ ý là cách dùng đa-cluster bình thường (KUBECONFIG,
+// kubectx, kubie), và mỗi file đó là credential đầy đủ.
+
+const KUBE_DOCKER_SUFFIX = [
+  'cat ~/.kube/config',
+  'cat ~/.kube/config.bak',
+  'cat ~/.kube/config.old',
+  'cat ~/.kube/kubeconfig-staging',
+  'cat ~/.kube/configs/prod.yaml',
+  'cat ~/.docker/config.json',
+  'cat ~/.docker/config.json.bak',
+];
+
+test('chặn biến thể hậu tố của kubeconfig và docker config, dạng ~', () => {
+  // Tên file cố ý không khớp bất kỳ pattern basename nào trong denyPaths
+  // (`**/credentials`, `**/id_rsa`, `**/*.key`, `**/service-account*.json`...),
+  // nên chỉ pattern `~` mới chặn được — nếu không, test sẽ xanh trên code hỏng.
+  for (const cmd of KUBE_DOCKER_SUFFIX) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'deny', `lọt: ${cmd}`);
+    assert.equal(r.ruleId, 'secrets.read-path', cmd);
+  }
+});
+
+test('chặn biến thể hậu tố, dạng tuyệt đối $HOME', () => {
+  // Đường đi vòng hiển nhiên nhất: bị chặn `~/.kube/config.bak` thì viết
+  // `/Users/<user>/.kube/config.bak`. Đã đo: trước khi sửa cả hai đều LỌT.
+  for (const cmd of KUBE_DOCKER_SUFFIX) {
+    const abs = cmd.replace('~', homedir());
+    const r = evaluate(shell(abs), P);
+    assert.equal(r.decision, 'deny', `lọt: ${abs}`);
+    assert.equal(r.ruleId, 'secrets.read-path', abs);
+  }
+});
+
+test('nới `~/.kube/**` không kéo `~/.docker` vào theo', () => {
+  // `~/.docker/config.json*` phải là nới hậu tố, KHÔNG phải nới cây và cũng
+  // không phải `config*`. Bảy ca này allow ở cả trước lẫn sau khi sửa.
+  for (const cmd of [
+    'cat ~/.docker/daemon.json',
+    'cat ~/.docker/daemon.json.bak',
+    'cat ~/.docker/buildx/current',
+    'ls ~/.docker/cli-plugins',
+    'cat ~/.docker/contexts/meta/abc/meta.json',
+    'cat ~/.docker/configx.json',
+    'cat ~/.docker/config.yaml',
+  ]) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId ?? ''}`);
+  }
+});
+
+test('nới `~/.kube/**` không chặn oan liệt kê thư mục hay lệnh thường', () => {
+  // `ls ~/.kube` (không có `/` cuối) chỉ liệt kê TÊN file, không tiết lộ nội
+  // dung credential — cùng phán quyết đã chốt cho `ls ~/.ssh` ở Task 6.
+  // `~/.kube` không có `/` nên không khớp `^HOME/\.kube/.*$`.
+  for (const cmd of ['ls ~/.kube', 'ls -la ~/.kube', 'mkdir -p ~/.kube',
+                     'npm test', 'cat ~/.kubernetes/x', 'cat ~/.kubeconfig',
+                     'cat ~/kube/config', 'cat ./kube/config']) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId ?? ''}`);
+  }
+});
+
+// Khoá lại một phán quyết dễ bị lật: KHÔNG thêm allowPath cho
+// `~/.kube/cache/**` / `~/.kube/http-cache/**`.
+//
+// Cái giá của `~/.kube/**` là 10 đường dẫn KHÔNG-credential bị chặn theo, tất
+// cả đều là cache discovery do kubectl tự sinh (`~/.kube/cache`,
+// `~/.kube/http-cache`, `config.lock`, `plugins`, `schema`). Đã đo: chúng vô
+// hại vì `kubectl` và `helm` đã nằm trong `infra.denyBinaries` — agent trong
+// guardrail này không chạy được kubectl, nên cache của kubectl là đồ chết. Mất
+// 0 workflow mà policy chưa chặn từ trước.
+//
+// Còn khoét lỗ cache thì MẤT THẬT: `matchesAny` so khớp trên chuỗi thô,
+// `normalizePath` KHÔNG rút gọn `..`. Nên allowPath dạng `**` bên trong một cây
+// deny sẽ tự mở đường đi vòng — đã đo: thêm `~/.kube/cache/**` làm
+// `cat ~/.kube/cache/../config` chuyển từ deny sang ALLOW, tức mở lại đúng cái
+// file mà cả round này tồn tại để chặn. Đây cũng là lý do ba entry allowPaths
+// của `~/.ssh` đều là một-tầng (`~/.ssh/*.pub`) hoặc đúng-y, không có `**`.
+test('không được khoét allowPath dạng `**` bên trong cây ~/.kube', () => {
+  for (const cmd of ['cat ~/.kube/cache/../config',
+                     'cat ~/.kube/http-cache/../config',
+                     'cat ~/.kube/x/../config']) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'deny', `allowPath \`**\` đã mở đường đi vòng: ${cmd}`);
+  }
+});

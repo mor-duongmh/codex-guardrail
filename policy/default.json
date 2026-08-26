@@ -4,8 +4,8 @@
       "**/.env", "**/.env.*", "**/*.pem", "**/*.key", "**/*.p12", "**/*.pfx",
       "**/*.jks", "**/id_rsa", "**/id_ed25519", "**/credentials",
       "**/service-account*.json", "**/.npmrc", "**/.netrc", "**/.git-credentials",
-      "~/.aws/**", "~/.config/gcloud/**", "~/.kube/config", "~/.ssh/**",
-      "~/.docker/config.json"
+      "~/.aws/**", "~/.config/gcloud/**", "~/.kube/**", "~/.ssh/**",
+      "~/.docker/config.json*"
     ],
     "allowPaths": [
       "**/.env.example", "**/.env.sample", "**/.env.template",
