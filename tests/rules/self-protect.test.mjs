@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluate } from '../../lib/rules/self-protect.mjs';
+import { homedir } from 'node:os';
 import { loadDefaultPolicy, mergePolicy } from '../../lib/policy.mjs';
 
 const P = loadDefaultPolicy();
@@ -293,4 +294,125 @@ test('message chặn nói đủ ba điều: rule nào, vì sao, làm gì tiếp'
   assert.ok(r.hint.length > 0, 'hint phải nói làm gì tiếp');
   const h = evaluate(patch(['~/.codex/hooks.json']), P);
   assert.ok(h.hint.includes('hook') || h.hint.includes('Codex'), h.hint);
+});
+
+// ---------------------------------------------------------------------------
+// Chặn theo THƯ MỤC TỔ TIÊN.
+// Bảo vệ `~/.codex/hooks.json` mà không bảo vệ thư mục `~/.codex` thì không token
+// nào khớp glob nào. Đã đo trước khi sửa: `rm -rf ~/.codex` (thảo sạch
+// guardrail), `rm -rf ~/.codex/guardrail`, `mv ~/.codex ~/.codex-off` đều LỌT.
+const RM = 'rm -rf ';
+
+test('chặn xoá hoặc dời chính thư mục chứa guardrail', () => {
+  for (const cmd of [
+    RM + '~/.codex',
+    RM + '~/.codex/guardrail',
+    'mv ~/.codex ~/.codex-off',
+    // Cách viết khác của ĐÚNG những lệnh đó — bỏ sót là bỏ ngỏ đường đi vòng.
+    RM + '~/.codex/',
+    'rm -r ~/.codex',
+    'rm -rf -- ~/.codex',
+    RM + homedir() + '/.codex',
+    'mv ' + homedir() + '/.codex /tmp/x',
+    'mv ~/.codex/guardrail /tmp/g',
+    // Bọc wrapper / nhóm lệnh / vòng lặp: cùng một lệnh hữu hiệu.
+    'sudo ' + RM + '~/.codex',
+    '(cd /tmp && ' + RM + '~/.codex)',
+    'if true; then ' + RM + '~/.codex; fi',
+    'for f in a; do ' + RM + '~/.codex; done',
+    RM + 'node_modules && ' + RM + '~/.codex',
+    // Nhiều tham số: thư mục được bảo vệ ở bất kỳ vị trí nào cũng phải bắt.
+    RM + '~/.codex ~/tmp',
+    RM + '~/tmp ~/.codex',
+  ]) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'deny', `lọt: ${cmd}`);
+    assert.ok(r.ruleId.startsWith('selfprotect.'), `${cmd} => ${r.ruleId}`);
+  }
+});
+
+test('ruleId của chặn tổ tiên theo đúng nhóm sở hữu glob', () => {
+  // ruleId là KHOÁ ESCAPE, nên nhóm phải đúng: escape cho thư mục cài không
+  // được kèm luôn quyền tháo hook.
+  assert.equal(evaluate(shell(RM + '~/.codex/guardrail'), P).ruleId,
+    'selfprotect.install-dir');
+  assert.equal(evaluate(shell(RM + '~/.codex'), P).ruleId, 'selfprotect.hooks-file');
+});
+
+// Điều kiện SỐNG CÒN của hướng chặn-theo-tổ-tiên: pattern `**/codex-guardrail.json`
+// có tiền tố literal RỖNG. Nếu không bỏ qua nó thì MỌI đường dẫn đều là "tổ tiên"
+// của tiền tố rỗng và `rm -rf` bất cứ gì cũng bị chặn — chặn oan hàng loạt, mà
+// chặn oan là chế độ hỏng tệ nhất: dev sẽ tắt guardrail.
+test('chống chặn oan: xoá thư mục thường ngày phải cho qua', () => {
+  for (const cmd of [
+    RM + 'node_modules', RM + '/tmp/build', RM + './dist',
+    RM + '~/Library/Caches/foo', RM + '~/Downloads/x',
+    RM + 'dist', RM + 'build', RM + 'coverage', RM + '.next', RM + 'target',
+    RM + 'node_modules/.cache', RM + 'packages/*/dist', RM + '/var/tmp/x',
+    RM + '~/tmp', RM + '~/.cache/pip', RM + '~/.npm/_cacache',
+    RM + '~/Library/Developer/Xcode/DerivedData', RM + '~/go/pkg/mod',
+    'rm -f package-lock.json', 'rm -f .eslintcache',
+    'mv dist/old dist/new', 'mv ~/Downloads/x ~/tmp/x', 'mv build /tmp/build',
+  ]) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId ?? ''}`);
+  }
+});
+
+test('chống chặn oan: thư mục cùng tiền tố tên KHÔNG phải ~/.codex', () => {
+  // So khớp phải theo ranh giới thư mục. `~/.codexother` là thư mục khác.
+  for (const cmd of [RM + '~/.codexother', RM + '~/.cod', RM + '~/codex',
+                     RM + '~/.codex-backup-of-mine', RM + '~/.claude',
+                     'mv ~/.codexother ~/tmp']) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId ?? ''}`);
+  }
+});
+
+test('chống chặn oan: ghi VÀO thư mục không phải phá thư mục', () => {
+  // `cp x ~/.codex` tạo `~/.codex/x`, `mv report.json ~/.codex` đưa file VÀO.
+  // Chỉ `rm` và tham số NGUỒN của `mv` mới làm mất thư mục.
+  for (const cmd of ['cp report.json ~/.codex', 'mv report.json ~/.codex',
+                     'mv a.txt ~/.codex/', 'touch ~/.codex/notes.md']) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId ?? ''}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Audit log (§9). Không bảo vệ thì agent xoá được đúng bản ghi bị chặn của nó,
+// và `guardrail stats` mất dữ liệu để biết rule nào chặn oan.
+const AUDIT = '~/.codex/guardrail-audit.jsonl';
+
+test('chặn xoá hoặc ghi đè audit log', () => {
+  for (const cmd of [
+    `rm ${AUDIT}`, RM + AUDIT, `mv ${AUDIT} /tmp/gone.jsonl`,
+    `echo x > ${AUDIT}`, `echo x >> ${AUDIT}`, `: > ${AUDIT}`,
+    `truncate -s 0 ${AUDIT}`, `sed -i /denied/d ${AUDIT}`,
+    `cp /dev/null ${AUDIT}`, `tee ${AUDIT}`,
+    `rm ${homedir()}/.codex/guardrail-audit.jsonl`,
+  ]) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'deny', `lọt: ${cmd}`);
+    assert.equal(r.ruleId, 'selfprotect.audit-log', cmd);
+  }
+});
+
+test('ĐỌC audit log phải cho qua', () => {
+  // Log tồn tại để người đọc. Chặn đọc là chặn oan đúng cái công cụ chẩn đoán
+  // mà `guardrail stats` dựng trên nó.
+  for (const cmd of [`cat ${AUDIT}`, `tail -20 ${AUDIT}`, `tail -f ${AUDIT}`,
+                     `head -1 ${AUDIT}`, `wc -l ${AUDIT}`, `grep denied ${AUDIT}`,
+                     `jq -r .ruleId ${AUDIT}`, `less ${AUDIT}`,
+                     `cp ${AUDIT} /tmp/backup.jsonl`]) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId ?? ''}`);
+  }
+});
+
+test('apply_patch vào audit log bị chặn, message nói đủ ba điều', () => {
+  const r = evaluate(patch([AUDIT]), P);
+  assert.equal(r.ruleId, 'selfprotect.audit-log');
+  assert.ok(r.reason.includes('audit log'), r.reason);
+  assert.ok(r.hint.length > 0, 'hint phải nói làm gì tiếp');
 });

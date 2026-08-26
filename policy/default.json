@@ -53,7 +53,8 @@
     "protectedPaths": {
       "selfprotect.policy-file": ["**/codex-guardrail.json"],
       "selfprotect.hooks-file": ["~/.codex/hooks.json", "~/.codex/config.toml"],
-      "selfprotect.install-dir": ["~/.codex/guardrail/**"]
+      "selfprotect.install-dir": ["~/.codex/guardrail/**"],
+      "selfprotect.audit-log": ["~/.codex/guardrail-audit.jsonl"]
     }
   }
 }
