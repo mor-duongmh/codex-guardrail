@@ -21,8 +21,8 @@
       "docker\\s+system\\s+prune",
       "docker\\s+volume\\s+rm",
       "npm\\s+publish",
-      "rm\\s+-rf\\s+/",
-      "rm\\s+-rf\\s+~"
+      "rm\\s+-\\S*[rR]\\S*\\s+/+\\*?(\\s+.*)?$",
+      "rm\\s+-\\S*[rR]\\S*\\s+~/*\\*?(\\s+.*)?$"
     ],
     "ssh": { "denyHosts": [], "inspectRemoteCommand": true }
   },
