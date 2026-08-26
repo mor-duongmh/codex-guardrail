@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, appendFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, appendFileSync, statSync, chmodSync } from 'node:fs';
 import { tmpdir, platform } from 'node:os';
 import { join } from 'node:path';
 
@@ -57,11 +57,16 @@ test('readEntries bỏ qua dòng hỏng', async () => {
 test('file có quyền 0o600, directory có quyền 0o700 (POSIX only)', async () => {
   if (platform() === 'win32') return; // Bỏ qua Windows
   const p = freshAudit();
+  const dir = join(p, '..');
   const { record } = await import('../lib/audit.mjs');
+
+  // Setup: chmod directory thành 0o755 để verify record() đặt lại thành 0o700
+  chmodSync(dir, 0o755);
+
   record({ decision: 'denied', ruleId: 'x' });
 
   const fileStat = statSync(p);
-  const dirStat = statSync(join(p, '..'));
+  const dirStat = statSync(dir);
 
   // Kiểm tra quyền file là 0o600 (rw-------)
   const fileMode = fileStat.mode & parseInt('777', 8);

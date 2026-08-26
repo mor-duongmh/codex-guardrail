@@ -71,3 +71,40 @@ test('findSecretKinds tìm multiple loại', () => {
   assert.ok(kinds.includes('url-userinfo'));
   assert.ok(kinds.includes('github-token'));
 });
+
+test('LỘ: psql --password cách bằng space không được che', () => {
+  const cmd = 'psql -h prod-db --password S3cr3tPw -U admin app';
+  const out = redact(cmd);
+  assert.ok(!out.includes('S3cr3tPw'), 'S3cr3tPw phải được che');
+});
+
+test('LỘ: mysqldump --password space không được che', () => {
+  const cmd = 'mysqldump --password MyP4ssw0rd db';
+  const out = redact(cmd);
+  assert.ok(!out.includes('MyP4ssw0rd'), 'MyP4ssw0rd phải được che');
+});
+
+test('che-thừa: npm run build --production không thay đổi', () => {
+  const cmd = 'npm run build --production';
+  assert.equal(redact(cmd), cmd);
+});
+
+test('che-thừa: aws --profile không thay đổi', () => {
+  const cmd = 'aws --profile prod s3 ls';
+  assert.equal(redact(cmd), cmd);
+});
+
+test('che-thừa: git clone --progress không thay đổi', () => {
+  const cmd = 'git clone --progress url';
+  assert.equal(redact(cmd), cmd);
+});
+
+test('che-thừa: make -parallelism không thay đổi', () => {
+  const cmd = 'make -parallelism=5';
+  assert.equal(redact(cmd), cmd);
+});
+
+test('findSecretKinds case-insensitive cho env variable', () => {
+  assert.deepEqual(findSecretKinds('aws_secret_access_key=abc123'), ['env-sensitive']);
+  assert.deepEqual(findSecretKinds('AWS_SECRET_ACCESS_KEY=abc123'), ['env-sensitive']);
+});
