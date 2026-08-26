@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, appendFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdtempSync, readFileSync, appendFileSync, statSync } from 'node:fs';
+import { tmpdir, platform } from 'node:os';
 import { join } from 'node:path';
 
 function freshAudit() {
@@ -52,4 +52,22 @@ test('readEntries bỏ qua dòng hỏng', async () => {
   appendFileSync(p, 'không phải json\n');
   record({ decision: 'denied', ruleId: 'b' });
   assert.equal(readEntries().length, 2);
+});
+
+test('file có quyền 0o600, directory có quyền 0o700 (POSIX only)', async () => {
+  if (platform() === 'win32') return; // Bỏ qua Windows
+  const p = freshAudit();
+  const { record } = await import('../lib/audit.mjs');
+  record({ decision: 'denied', ruleId: 'x' });
+
+  const fileStat = statSync(p);
+  const dirStat = statSync(join(p, '..'));
+
+  // Kiểm tra quyền file là 0o600 (rw-------)
+  const fileMode = fileStat.mode & parseInt('777', 8);
+  assert.equal(fileMode, 0o600, `expected file mode 0o600, got 0o${fileMode.toString(8)}`);
+
+  // Kiểm tra quyền directory là 0o700 (rwx------)
+  const dirMode = dirStat.mode & parseInt('777', 8);
+  assert.equal(dirMode, 0o700, `expected dir mode 0o700, got 0o${dirMode.toString(8)}`);
 });

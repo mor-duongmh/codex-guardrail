@@ -39,3 +39,35 @@ test('chuỗi rỗng hoặc null an toàn', () => {
   assert.equal(redact(''), '');
   assert.equal(redact(null), '');
 });
+
+test('che URL userinfo - postgresql', () => {
+  const cmd = 'psql postgresql://admin:S3cr3tPw@db.prod:5432/app';
+  assert.ok(!redact(cmd).includes('S3cr3tPw'));
+  assert.ok(redact(cmd).includes('admin:***@'));
+});
+
+test('che password flag -p mysql', () => {
+  const cmd = 'mysql -uroot -pMyP4ssw0rd app_db';
+  assert.ok(!redact(cmd).includes('MyP4ssw0rd'));
+  assert.ok(redact(cmd).includes('-p***'));
+});
+
+test('che env assignment AWS_SECRET_ACCESS_KEY', () => {
+  const cmd = 'AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCY aws s3 ls';
+  assert.ok(!redact(cmd).includes('wJalrXUtnFEMI'));
+  assert.ok(redact(cmd).includes('AWS_SECRET_ACCESS_KEY=***'));
+});
+
+test('che Authorization Bearer header', () => {
+  const cmd = 'curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.abc.def" api';
+  assert.ok(!redact(cmd).includes('eyJhbGciOiJIUzI1NiJ9'));
+  assert.ok(redact(cmd).includes('Authorization: Bearer ***'));
+});
+
+test('findSecretKinds tìm multiple loại', () => {
+  const cmd = 'AWS_SECRET_ACCESS_KEY=secret postgresql://user:pass@host ghp_abcdefghijklmnopqrst';
+  const kinds = findSecretKinds(cmd);
+  assert.ok(kinds.includes('env-sensitive'));
+  assert.ok(kinds.includes('url-userinfo'));
+  assert.ok(kinds.includes('github-token'));
+});
