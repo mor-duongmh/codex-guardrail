@@ -160,3 +160,108 @@ test('che-thừa: psql -p 5432 (cổng) không thay đổi', () => {
   const cmd = 'psql -p 5432 -h db -l';
   assert.equal(redact(cmd), cmd);
 });
+
+// --- Round 4: giá trị -p trong quote (lỗ hổng mà 3 round trước để hở) ---
+// Bug cũ: /-p([^\s=]+)/ dừng ở khoảng trắng đầu tiên, nên chỉ '-p'my bị nuốt,
+// phần còn lại của giá trị trong quote in nguyên văn ra output.
+
+test('che: mysql -p\'my pass\' db (single quote chứa khoảng trắng)', () => {
+  const cmd = "mysql -p'my pass' db";
+  const out = redact(cmd);
+  assert.ok(!out.includes('my pass'), 'giá trị trong quote không được lộ');
+  assert.ok(!out.includes("pass'"), 'phần đuôi sau khoảng trắng không được lộ trần');
+  assert.equal(out, 'mysql -p*** db');
+});
+
+test('che: mysql -p"my pass" db (double quote chứa khoảng trắng)', () => {
+  const cmd = 'mysql -p"my pass" db';
+  const out = redact(cmd);
+  assert.ok(!out.includes('my pass'), 'giá trị trong quote không được lộ');
+  assert.ok(!out.includes('pass"'), 'phần đuôi sau khoảng trắng không được lộ trần');
+  assert.equal(out, 'mysql -p*** db');
+});
+
+test('che: mysql -p\'secret\' db (single quote không khoảng trắng)', () => {
+  const cmd = "mysql -p'secret' db";
+  const out = redact(cmd);
+  assert.ok(!out.includes('secret'));
+  assert.equal(out, 'mysql -p*** db');
+});
+
+test('che: mysql -pYWJjZA== db (base64, padding == lộ được chấp nhận)', () => {
+  const cmd = 'mysql -pYWJjZA== db';
+  const out = redact(cmd);
+  assert.ok(!out.includes('YWJjZA'), 'thân base64 phải được che');
+});
+
+test('che: cả hai -p khi nối lệnh bằng &&', () => {
+  const cmd = 'mysql -pa1 && psql -pb2';
+  const out = redact(cmd);
+  assert.ok(!out.includes('a1'));
+  assert.ok(!out.includes('b2'));
+});
+
+test('che: URL userinfo postgresql với password khác', () => {
+  const cmd = 'psql postgresql://admin:UrlPw1@db:5432/app';
+  const out = redact(cmd);
+  assert.ok(!out.includes('UrlPw1'));
+});
+
+test('che: env variable chữ thường qua redact() (không chỉ findSecretKinds)', () => {
+  const cmd = 'aws_secret_access_key=wJalrXUtnFEMI aws s3 ls';
+  const out = redact(cmd);
+  assert.ok(!out.includes('wJalrXUtnFEMI'));
+});
+
+test('che: Authorization Basic header', () => {
+  const cmd = 'curl -H "Authorization: Basic dXNlcjpwYXNz"';
+  const out = redact(cmd);
+  assert.ok(!out.includes('dXNlcjpwYXNz'));
+  assert.ok(out.includes('Authorization: Basic ***'));
+});
+
+test('che: export DB_PASSWORD=hunter2 && ./run', () => {
+  const cmd = 'export DB_PASSWORD=hunter2 && ./run';
+  const out = redact(cmd);
+  assert.ok(!out.includes('hunter2'));
+  assert.ok(out.includes('DB_PASSWORD=***'));
+});
+
+test('giữ nguyên: git push origin main', () => {
+  const cmd = 'git push origin main';
+  assert.equal(redact(cmd), cmd);
+});
+
+test('giữ nguyên: ls -la /etc/passwd', () => {
+  const cmd = 'ls -la /etc/passwd';
+  assert.equal(redact(cmd), cmd);
+});
+
+test('giữ nguyên: foo-psecret (giữa từ, không phải flag)', () => {
+  const cmd = 'foo-psecret';
+  assert.equal(redact(cmd), cmd);
+});
+
+test('không mask sai: mysql -p (cuối chuỗi, không giá trị)', () => {
+  const cmd = 'mysql -p';
+  assert.equal(redact(cmd), cmd);
+});
+
+// --- Round 4 bonus: --password= và --password<space> có lỗ quote y hệt -p,
+// chưa từng bị đo tới. Sửa đồng bộ trong cùng lần này vì cùng file, cùng lớp bug.
+
+test('che: --password value trong single quote chứa khoảng trắng', () => {
+  const cmd = "psql -h h --password 'S3cr3t Pw' -U a";
+  const out = redact(cmd);
+  assert.ok(!out.includes('S3cr3t Pw'));
+  assert.ok(!out.includes("Pw'"), "phần đuôi sau khoảng trắng không được lộ trần");
+  assert.equal(out, 'psql -h h --password *** -U a');
+});
+
+test('che: --password=value trong double quote chứa khoảng trắng', () => {
+  const cmd = 'mysqldump --password="P4ss 99" db';
+  const out = redact(cmd);
+  assert.ok(!out.includes('P4ss 99'));
+  assert.ok(!out.includes('99"'), "phần đuôi sau khoảng trắng không được lộ trần");
+  assert.equal(out, 'mysqldump --password=*** db');
+});
