@@ -65,3 +65,45 @@ test('message deny nói đủ ba điều', () => {
 test('không chặn oan khi tên file chỉ nằm trong câu văn', () => {
   assert.equal(evaluate(shell('git commit -m "thêm .env vào gitignore"'), P).decision, 'allow');
 });
+
+test('chặn 9 ca xả env và secret manager', () => {
+  const mustBlock = [
+    'env',
+    'printenv',
+    'set',
+    'env | grep SECRET',
+    'env > /tmp/dump.txt',
+    'env && cat /tmp/x',
+    'ls && env',
+    'printenv | grep AWS',
+    'printenv AWS_SECRET_ACCESS_KEY',
+  ];
+
+  for (const cmd of mustBlock) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'deny', `ca: ${cmd}`);
+    assert.equal(r.ruleId, 'secrets.env-dump', `ca: ${cmd}`);
+  }
+});
+
+test('cho qua 12 ca dùng env/set với tham số hợp lệ', () => {
+  const mustAllow = [
+    'set -euo pipefail',
+    'set -e',
+    'set -x',
+    'env FOO=1 psql --version',
+    'env -u FOO npm test',
+    'git commit -m "set up env"',
+    'npm run set-env',
+    './scripts/setup-env.sh',
+    'npm run env:check',
+    'docker run --env-file .env.example app',
+    'kubectl set image dep/app app=img',
+    'printf env',
+  ];
+
+  for (const cmd of mustAllow) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'allow', `ca: ${cmd}`);
+  }
+});
