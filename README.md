@@ -74,8 +74,8 @@ là file của họ). Tầng 2 và 3 tồn tại chính vì thế.
 
 Nới cho một dự án: tạo `codex-guardrail.json` ở gốc repo đó. Mảng thì **hợp**
 với mặc định chứ không thay thế, nên thêm `infra.allowBinaries: ["supabase"]` là
-thêm vào, không mất phần còn lại. (`doctor` gợi ý `guardrail init` để sinh file
-này — subcommand đó chưa có ở bản này, tạo file bằng tay.)
+thêm vào, không mất phần còn lại. Tạo file bằng tay: bản này chưa có subcommand
+sinh sẵn (để lại plan sau), và không chỗ nào chỉ bạn tới lệnh chưa tồn tại.
 
 ## Escape
 
