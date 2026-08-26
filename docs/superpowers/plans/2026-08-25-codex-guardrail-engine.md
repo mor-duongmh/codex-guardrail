@@ -24,17 +24,42 @@ Mọi task đều phải giữ các ràng buộc sau (trích nguyên từ spec):
 - **Không dependency runtime.** `package.json` không có `dependencies`.
 - **Đa nền tảng:** macOS, Linux, Windows. Không dùng lệnh shell chỉ có trên Unix trong engine. Không dùng symlink trong `install`.
 - **Độ trễ:** hook `PreToolUse` chạy trên mọi tool call. Ngân sách p95 < 150ms. Rule xếp rẻ trước đắt sau; `git rev-parse` chỉ gọi khi cần; short-circuit ở deny đầu tiên.
-- **Exit code:** `0` allow, `2` deny (message ở stderr), `3` lỗi nội bộ fail-closed.
+- **Kênh chặn = JSON, không phải exit code.** Hook **luôn** exit `0` và chặn bằng cách ghi ra stdout
+  `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"…"}}`.
+  Task 0 xác nhận exit 2 + stderr cũng chặn được, nhưng exit `3` (fail-closed) **chưa từng được kiểm** — Codex có thể
+  coi đó là hook lỗi rồi **cho lệnh chạy**. Vì vậy fail-closed cũng phải deny qua JSON, không được dựa vào exit code.
 - **Chế độ lỗi:** rule an toàn (`secrets`, `infra`, `git`, `selfprotect`) ném exception → **fail-closed**. Rule chất lượng (`convention`, `quality`, `redact`) ném exception → **fail-open** + cảnh báo.
 - **Contract rule:** `evaluate(ctx, policy) => { decision, ruleId, reason, hint }`, `decision ∈ {"allow","deny"}`. Rule không áp dụng thì trả `allow`. Không đọc stdin, không `exit`, không ghi log. Rule cần side effect (gọi `git`) nhận tham số thứ ba `deps` để test tiêm được — dispatcher không truyền, dùng mặc định.
 - **Message chặn** phải nói ba điều: vi phạm rule nào, vì sao, làm gì tiếp.
 - **Tiếng Việt có dấu đầy đủ** trong mọi message hướng tới người dùng.
 
+**Hợp đồng hook Codex — đã xác nhận thực nghiệm trên 0.149.0-alpha.4.3** (chi tiết:
+`docs/superpowers/spikes/2026-08-25-codex-hook-contract.md`, fixture: `tests/fixtures/codex-events/`).
+Đây là dữ kiện đo được, không phải suy đoán — đừng đổi theo tài liệu cũ của morkit:
+
+- Tên tool là **`Bash`** (không phải `shell`) và **`apply_patch`**. Matcher là regex; bỏ trống = khớp mọi tool.
+- Payload có `cwd` → lấy repo root từ đó. Có sẵn `session_id`, `turn_id`, `transcript_path`, `model`,
+  `permission_mode`, `tool_name`, `tool_input`, `tool_use_id`; `PostToolUse` thêm `tool_response` (chuỗi thô).
+  `SessionStart` không có `turn_id`/`tool_*`, có `source`.
+- `apply_patch` **không có** field đường dẫn: `tool_input.command` là nguyên văn patch envelope
+  (`*** Add File:` / `*** Update File:` / `*** Delete File:`), phải parse thân text để lấy path.
+- **Xoá file đi qua `Bash` với `rm`**, không qua `apply_patch` — self-protect phải bắt cả nhánh Bash.
+- Codex **nối lệnh bằng `&&` như thói quen** (`rm -- x && rg … && test …`), không phải ngoại lệ. Rule chỉ soi
+  lệnh đầu là lọt ngay lượt đầu tiên.
+- Thông điệp chặn **nhiều dòng sống nguyên vẹn**, giữ thụt lề và dấu tiếng Việt. Codex nối `. Command: <lệnh>`
+  ngay sau reason → reason **không được** kết thúc bằng dấu chấm hay newline, nếu không sẽ ra `..`.
+- Hook chưa được grant trust thì Codex **bỏ qua im lặng**. Không tự động hoá được việc grant (`/hooks` trong TUI).
+  Cờ `--dangerously-bypass-hook-trust` chỉ dành cho CI của chính guardrail, **không** đưa vào tài liệu cho dev.
+
 ---
 
 ### Task 0: Spike — xác thực hợp đồng hook của Codex
 
-Task này **gating**: nếu kết quả là Codex không tôn trọng exit code non-zero thì dừng plan, quay lại brainstorming. Nó cũng sinh fixture JSON thật mà Task 4 phụ thuộc.
+**TASK NÀY ĐÃ XONG (2026-08-26).** Kết quả: Codex chặn thật, qua cả hai kênh. Fixture đã chuẩn hoá vào
+`tests/fixtures/codex-events/`; kết luận và các điểm plan phải sửa nằm trong
+`docs/superpowers/spikes/2026-08-25-codex-hook-contract.md`. Đọc phần **Hợp đồng hook Codex** ở Global
+Constraints trước khi làm bất kỳ task nào — nó ghi đè mọi giả định về tên tool và hình dạng payload.
+Các bước dưới đây giữ lại để tra cứu cách dựng lại spike, **không cần chạy lại**.
 
 **Files:**
 - Create: `spike/dump-hook.mjs`
@@ -96,9 +121,9 @@ const add=(ev,matcher,cmd)=>{
   j.hooks[ev]??=[];
   j.hooks[ev].push({...(matcher?{matcher}:{}),hooks:[{type:"command",command:cmd,_spike:true}]});
 };
-add("PreToolUse","shell",`node ${repo}/spike/dump-hook.mjs`);
+add("PreToolUse","Bash",`node ${repo}/spike/dump-hook.mjs`);
 add("PreToolUse","apply_patch",`node ${repo}/spike/dump-hook.mjs`);
-add("PostToolUse","shell",`node ${repo}/spike/dump-hook.mjs`);
+add("PostToolUse","Bash",`node ${repo}/spike/dump-hook.mjs`);
 add("SessionStart",null,`node ${repo}/spike/dump-hook.mjs`);
 fs.writeFileSync(p,JSON.stringify(j,null,2));
 ' "$PWD"
@@ -834,7 +859,7 @@ test('JSON hỏng thì ném ContextError', () => {
 test('payload shell thật cho ra event, tool và command', () => {
   const ctx = buildContext(fixture('pretooluse-shell'), {});
   assert.equal(ctx.event, 'PreToolUse');
-  assert.equal(ctx.tool, 'shell');
+  assert.equal(ctx.tool, 'Bash');
   assert.ok(typeof ctx.command === 'string' && ctx.command.length > 0);
 });
 
@@ -1098,7 +1123,7 @@ test('ghi một dòng JSONL có ts và ruleId', async () => {
   const p = freshAudit();
   const { record } = await import('../lib/audit.mjs');
   record({ decision: 'denied', ruleId: 'infra.deny-binary', event: 'PreToolUse',
-           tool: 'shell', repo: 'demo', branch: 'feat/x', command: 'psql -l' });
+           tool: 'Bash', repo: 'demo', branch: 'feat/x', command: 'psql -l' });
   const lines = readFileSync(p, 'utf8').trim().split('\n');
   assert.equal(lines.length, 1);
   const e = JSON.parse(lines[0]);
@@ -1211,7 +1236,7 @@ import { evaluate } from '../../lib/rules/secrets.mjs';
 import { loadDefaultPolicy } from '../../lib/policy.mjs';
 
 const P = loadDefaultPolicy();
-const shell = (command) => ({ tool: 'shell', command, patchFiles: [] });
+const shell = (command) => ({ tool: 'Bash', command, patchFiles: [] });
 const patch = (files) => ({ tool: 'apply_patch', command: null, patchFiles: files });
 
 test('chặn đọc .env bất kể động từ', () => {
@@ -1259,7 +1284,7 @@ test('chặn ghi vào file nhạy cảm qua apply_patch', () => {
 test('lệnh không liên quan thì cho qua', () => {
   assert.equal(evaluate(shell('npm test'), P).decision, 'allow');
   assert.equal(evaluate(shell(''), P).decision, 'allow');
-  assert.equal(evaluate({ tool: 'shell', command: null, patchFiles: [] }, P).decision, 'allow');
+  assert.equal(evaluate({ tool: 'Bash', command: null, patchFiles: [] }, P).decision, 'allow');
 });
 
 test('message deny nói đủ ba điều', () => {
@@ -1387,7 +1412,7 @@ import { evaluate } from '../../lib/rules/infra.mjs';
 import { loadDefaultPolicy, mergePolicy } from '../../lib/policy.mjs';
 
 const P = loadDefaultPolicy();
-const shell = (command) => ({ tool: 'shell', command, patchFiles: [] });
+const shell = (command) => ({ tool: 'Bash', command, patchFiles: [] });
 
 test('chặn client database', () => {
   for (const cmd of ['psql -l', 'mysql -u root', 'mongosh', 'redis-cli ping']) {
@@ -1458,7 +1483,7 @@ test('scp tới host bị chặn', () => {
 
 test('lệnh không liên quan và command null thì cho qua', () => {
   assert.equal(evaluate(shell('npm test'), P).decision, 'allow');
-  assert.equal(evaluate({ tool: 'shell', command: null, patchFiles: [] }, P).decision, 'allow');
+  assert.equal(evaluate({ tool: 'Bash', command: null, patchFiles: [] }, P).decision, 'allow');
 });
 
 test('message deny nêu tên binary và cách nới', () => {
@@ -1551,7 +1576,7 @@ export function evaluate(ctx, policy) {
         const { remote } = sshParts(sub.argv);
         if (remote) {
           const inner = evaluate(
-            { ...ctx, tool: 'shell', command: remote },
+            { ...ctx, tool: 'Bash', command: remote },
             { ...policy, infra: { ...cfg, ssh: { ...sshCfg, inspectRemoteCommand: false } } }
           );
           if (inner.decision === 'deny') {
@@ -1615,7 +1640,7 @@ import { evaluate } from '../../lib/rules/git-workflow.mjs';
 import { loadDefaultPolicy, mergePolicy } from '../../lib/policy.mjs';
 
 const P = loadDefaultPolicy();
-const shell = (command) => ({ tool: 'shell', command, patchFiles: [], cwd: '/tmp/demo' });
+const shell = (command) => ({ tool: 'Bash', command, patchFiles: [], cwd: '/tmp/demo' });
 const onBranch = (b) => ({ currentBranch: () => b });
 
 test('cho qua mọi lệnh git chỉ đọc', () => {
@@ -1850,7 +1875,7 @@ import { evaluate } from '../../lib/rules/self-protect.mjs';
 import { loadDefaultPolicy } from '../../lib/policy.mjs';
 
 const P = loadDefaultPolicy();
-const shell = (command) => ({ tool: 'shell', command, patchFiles: [] });
+const shell = (command) => ({ tool: 'Bash', command, patchFiles: [] });
 const patch = (files) => ({ tool: 'apply_patch', command: null, patchFiles: files });
 
 test('chặn agent tự phát escape cho chính nó', () => {
@@ -1897,7 +1922,7 @@ test('file khác thì cho qua', () => {
 });
 
 test('command null thì cho qua', () => {
-  assert.equal(evaluate({ tool: 'shell', command: null, patchFiles: [] }, P).decision, 'allow');
+  assert.equal(evaluate({ tool: 'Bash', command: null, patchFiles: [] }, P).decision, 'allow');
 });
 ```
 
@@ -1989,7 +2014,8 @@ git commit -m "feat(rule/selfprotect): chặn sửa policy, tháo hook, và agen
 **Interfaces:**
 - Consumes: mọi module ở Task 1–9
 - Produces:
-  - `runHook(rawStdin: string, env: object) => { code: number, stderr: string }` — hàm thuần để test, không `exit`
+  - `runHook(rawStdin: string, env: object) => { decision: 'allow'|'deny', stdout: string, stderr: string }`
+    — hàm thuần để test, không `exit`. `stdout` là JSON `permissionDecision` khi deny, chuỗi rỗng khi allow.
   - `denyMessage(result, ctx) => string`
   - `bin/guardrail.mjs` — subcommand `hook`; các subcommand khác thêm ở Task 11–12
 
@@ -2017,64 +2043,72 @@ function repo(files = {}) {
 }
 
 const payload = (cwd, command) => JSON.stringify({
-  hook_event_name: 'PreToolUse', tool_name: 'shell', cwd,
+  hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd,
   tool_input: { command },
 });
 
-test('lệnh vô hại thì exit 0 và không in gì', () => {
+// Lý do deny nằm trong JSON ở stdout. stderr chỉ dùng cho cảnh báo phụ (escape, rule chất lượng lỗi).
+const reasonOf = (r) =>
+  JSON.parse(r.stdout).hookSpecificOutput.permissionDecisionReason;
+
+test('lệnh vô hại thì allow và không in gì', () => {
   const r = runHook(payload(repo(), 'npm test'), {});
-  assert.equal(r.code, 0);
+  assert.equal(r.decision, 'allow');
+  assert.equal(r.stdout, '');
   assert.equal(r.stderr, '');
 });
 
-test('lệnh vi phạm thì exit 2 và stderr nói đủ ba điều', () => {
+test('lệnh vi phạm thì deny và lý do nói đủ ba điều', () => {
   const r = runHook(payload(repo(), 'psql -l'), {});
-  assert.equal(r.code, 2);
-  assert.ok(r.stderr.includes('infra.deny-binary'));
-  assert.ok(r.stderr.includes('Vì sao'));
-  assert.ok(r.stderr.includes('Làm gì tiếp'));
-  assert.ok(r.stderr.includes('CODEX_GUARDRAIL_ALLOW=infra.deny-binary'));
+  assert.equal(r.decision, 'deny');
+  const why = reasonOf(r);
+  assert.ok(why.includes('infra.deny-binary'));
+  assert.ok(why.includes('Vì sao'));
+  assert.ok(why.includes('Làm gì tiếp'));
+  assert.ok(why.includes('CODEX_GUARDRAIL_ALLOW=infra.deny-binary'));
+  // Codex nối `. Command: <lệnh>` ngay sau reason.
+  assert.ok(!/[.\n]$/.test(why), 'reason không được kết thúc bằng dấu chấm hay newline');
 });
 
-test('stdin rỗng thì exit 3 (fail-closed)', () => {
+test('stdin rỗng thì deny fail-closed', () => {
   const r = runHook('', {});
-  assert.equal(r.code, 3);
-  assert.ok(r.stderr.includes('fail-closed'));
+  assert.equal(r.decision, 'deny');
+  assert.ok(reasonOf(r).includes('fail-closed'));
 });
 
-test('policy hỏng thì exit 3, KHÔNG âm thầm dùng default', () => {
+test('policy hỏng thì deny, KHÔNG âm thầm dùng default', () => {
   const dir = repo({ 'codex-guardrail.json': '{ "infra": ' });
   const r = runHook(payload(dir, 'npm test'), {});
-  assert.equal(r.code, 3);
-  assert.ok(r.stderr.includes('codex-guardrail.json'));
+  assert.equal(r.decision, 'deny');
+  assert.ok(reasonOf(r).includes('codex-guardrail.json'));
 });
 
 test('escape đúng ruleId thì cho qua và cảnh báo', () => {
   const r = runHook(payload(repo(), 'psql -l'), { CODEX_GUARDRAIL_ALLOW: 'infra.deny-binary' });
-  assert.equal(r.code, 0);
+  assert.equal(r.decision, 'allow');
   assert.ok(r.stderr.includes('bị bỏ qua'));
 });
 
 test('escape sai ruleId thì vẫn chặn', () => {
   const r = runHook(payload(repo(), 'psql -l'), { CODEX_GUARDRAIL_ALLOW: 'git.no-verify' });
-  assert.equal(r.code, 2);
+  assert.equal(r.decision, 'deny');
 });
 
 test('escape không nhận wildcard', () => {
   const r = runHook(payload(repo(), 'psql -l'), { CODEX_GUARDRAIL_ALLOW: '*' });
-  assert.equal(r.code, 2);
+  assert.equal(r.decision, 'deny');
 });
 
 test('event hoặc tool không khai rule thì exit 0 ngay', () => {
   const raw = JSON.stringify({
     hook_event_name: 'PreCompact', tool_name: 'whatever', cwd: '/tmp', tool_input: {},
   });
-  assert.equal(runHook(raw, {}).code, 0);
+  assert.equal(runHook(raw, {}).decision, 'allow');
 });
 
 test('selfprotect chạy trước infra', () => {
   const r = runHook(payload(repo(), 'CODEX_GUARDRAIL_ALLOW=x psql -l'), {});
-  assert.ok(r.stderr.includes('selfprotect.escape-inline'));
+  assert.ok(reasonOf(r).includes('selfprotect.escape-inline'));
 });
 
 test('denyMessage giữ đúng khuôn (golden)', () => {
@@ -2089,8 +2123,7 @@ test('denyMessage giữ đúng khuôn (golden)', () => {
 
   Escape một lần (người gõ, không phải agent):
     export CODEX_GUARDRAIL_ALLOW=infra.deny-binary
-  Nới vĩnh viễn: thêm vào codex-guardrail.json rồi mở PR (file có CODEOWNERS).
-`);
+  Nới vĩnh viễn: thêm vào codex-guardrail.json rồi mở PR (file có CODEOWNERS)`);
 });
 ```
 
@@ -2117,7 +2150,7 @@ const SAFETY_GROUPS = new Set(['selfprotect', 'secrets', 'infra', 'git']);
 
 const REGISTRY = {
   PreToolUse: {
-    shell: [
+    Bash: [
       ['selfprotect', selfProtect],
       ['secrets', secrets],
       ['infra', infra],
@@ -2131,6 +2164,8 @@ const REGISTRY = {
 };
 
 export function denyMessage(result, _ctx) {
+  // KHÔNG kết thúc bằng dấu chấm hay newline: Codex nối `. Command: <lệnh>` ngay sau reason,
+  // để nguyên sẽ ra `CODEOWNERS).. Command:` (Task 0 quan sát được).
   return `✗ guardrail chặn: ${result.ruleId}
 
   Vì sao: ${result.reason}
@@ -2138,16 +2173,33 @@ export function denyMessage(result, _ctx) {
 
   Escape một lần (người gõ, không phải agent):
     export CODEX_GUARDRAIL_ALLOW=${result.ruleId}
-  Nới vĩnh viễn: thêm vào codex-guardrail.json rồi mở PR (file có CODEOWNERS).
-`;
+  Nới vĩnh viễn: thêm vào codex-guardrail.json rồi mở PR (file có CODEOWNERS)`;
 }
 
-function failClosed(err) {
+// Deny đi qua JSON, KHÔNG qua exit code. Task 0 chỉ xác nhận exit 0+JSON và exit 2 là chặn thật;
+// exit 3 chưa từng được kiểm và có thể bị Codex coi là hook lỗi rồi CHO LỆNH CHẠY. Nên fail-closed
+// cũng deny qua JSON — an toàn hơn đúng-về-lý-thuyết.
+function deny(reason, stderr = '') {
   return {
-    code: 3,
-    stderr: `✗ guardrail fail-closed: ${err.message}\n`
-      + '  Guardrail chặn vì không xác định được tình huống. Sửa nguyên nhân rồi thử lại.\n',
+    decision: 'deny',
+    stdout: JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: reason,
+      },
+    }),
+    stderr,
   };
+}
+
+const allow = (stderr = '') => ({ decision: 'allow', stdout: '', stderr });
+
+function failClosed(err) {
+  return deny(
+    `✗ guardrail fail-closed: ${err.message}\n`
+    + '  Guardrail chặn vì không xác định được tình huống. Sửa nguyên nhân rồi thử lại',
+  );
 }
 
 export function runHook(rawStdin, env = {}) {
@@ -2160,7 +2212,7 @@ export function runHook(rawStdin, env = {}) {
   }
 
   const rules = REGISTRY[ctx.event]?.[ctx.tool] ?? [];
-  if (rules.length === 0) return { code: 0, stderr: '' };
+  if (rules.length === 0) return allow();
 
   let policy;
   try {
@@ -2196,10 +2248,10 @@ export function runHook(rawStdin, env = {}) {
     }
 
     record({ decision: 'denied', ...common });
-    return { code: 2, stderr: stderr + denyMessage(res, ctx) };
+    return deny(denyMessage(res, ctx), stderr);
   }
 
-  return { code: 0, stderr };
+  return allow(stderr);
 }
 ```
 
@@ -2233,9 +2285,11 @@ const sub = process.argv[2];
 
 if (sub === 'hook') {
   const raw = await readStdin();
-  const { code, stderr } = runHook(raw, process.env);
+  const { stdout, stderr } = runHook(raw, process.env);
+  if (stdout) process.stdout.write(stdout);
   if (stderr) process.stderr.write(stderr);
-  process.exit(code);
+  // LUÔN exit 0: quyết định nằm trong JSON ở stdout, không nằm ở exit code.
+  process.exit(0);
 } else {
   process.stderr.write(USAGE);
   process.exit(1);
@@ -2270,7 +2324,7 @@ function run(payloadStr, cwd) {
 }
 
 const payload = (cwd, command) => JSON.stringify({
-  hook_event_name: 'PreToolUse', tool_name: 'shell', cwd, tool_input: { command },
+  hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd, tool_input: { command },
 });
 
 test('exit 0 cho lệnh vô hại', () => {
@@ -2278,16 +2332,22 @@ test('exit 0 cho lệnh vô hại', () => {
   assert.equal(run(payload(dir, 'npm test'), dir).status, 0);
 });
 
-test('exit 2 và in lý do cho lệnh vi phạm', () => {
+test('deny in JSON ra stdout, vẫn exit 0', () => {
   const dir = repo();
   const r = run(payload(dir, 'terraform apply'), dir);
-  assert.equal(r.status, 2);
-  assert.ok(r.stderr.includes('infra.deny-binary'));
+  assert.equal(r.status, 0, 'exit code không phải kênh chặn — phải luôn 0');
+  const out = JSON.parse(r.stdout).hookSpecificOutput;
+  assert.equal(out.hookEventName, 'PreToolUse');
+  assert.equal(out.permissionDecision, 'deny');
+  assert.ok(out.permissionDecisionReason.includes('infra.deny-binary'));
 });
 
-test('exit 3 khi stdin rỗng', () => {
+test('stdin rỗng vẫn deny qua JSON, exit 0', () => {
   const dir = repo();
-  assert.equal(run('', dir).status, 3);
+  const r = run('', dir);
+  assert.equal(r.status, 0);
+  assert.equal(
+    JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny');
 });
 
 test('không có subcommand thì in cách dùng và exit 1', () => {
@@ -2317,6 +2377,33 @@ git commit -m "feat(dispatch): entry hook, exit code 0/2/3, escape theo ruleId, 
 ---
 
 ### Task 11: `install` và `uninstall`
+
+**Bổ sung bắt buộc theo Task 0 — `install` một lệnh là KHÔNG ĐỦ.**
+
+Codex bỏ qua **im lặng** mọi hook chưa được grant trust, và việc grant không tự động hoá được
+(người dùng phải gõ `/hooks` trong TUI, Codex băm nội dung hook để theo dõi trust). Vì vậy:
+
+1. Matcher là `Bash` và `apply_patch` — **không phải** `shell`. Đây là tên tool thật, đã đo.
+2. Bước cuối của `install` phải in nguyên khối sau, và `install` chỉ được báo thành công **một nửa**
+   cho tới khi người dùng làm xong:
+
+   ```
+   ⚠ Còn MỘT bước bạn phải tự làm — guardrail chưa chạy nếu thiếu bước này.
+
+     Codex bỏ qua mọi hook chưa được cấp tin cậy, và không báo gì cả.
+
+     1. Mở Codex CLI
+     2. Gõ: /hooks
+     3. Duyệt và cấp tin cậy (grant trust) cho các mục codex-guardrail
+
+     Chỉ phải làm MỘT LẦN. Sửa codex-guardrail.json về sau không làm mất tin cậy,
+     vì rule nằm trong file policy chứ không nằm trong lệnh hook.
+
+     Kiểm lại bằng: guardrail doctor
+   ```
+3. README phải nhắc lại bước này ngay cạnh lệnh cài, không đẩy xuống mục troubleshooting.
+4. **Không** đề cập `--dangerously-bypass-hook-trust` trong bất kỳ tài liệu nào cho dev. Cờ đó chỉ dùng
+   cho CI của chính guardrail. Dạy dev bypass trust là dạy họ tắt đúng cơ chế bảo vệ họ khỏi hook lạ.
 
 **Files:**
 - Create: `lib/install.mjs`
@@ -2392,7 +2479,7 @@ test('mergeHooks giữ nguyên entry sẵn có', () => {
     },
   };
   const out = mergeHooks(existing, [
-    { event: 'PreToolUse', matcher: 'shell', command: 'node g.mjs hook' },
+    { event: 'PreToolUse', matcher: 'Bash', command: 'node g.mjs hook' },
   ]);
   assert.equal(out.hooks.SessionStart.length, 1);
   assert.equal(out.hooks.SessionStart[0].hooks[0].command, 'morkit.sh');
@@ -2502,7 +2589,7 @@ function hookEntries() {
   const bin = join(installDir(), 'bin', 'guardrail.mjs');
   const cmd = `node "${bin}" hook`;
   return [
-    { event: 'PreToolUse', matcher: 'shell', command: cmd },
+    { event: 'PreToolUse', matcher: 'Bash', command: cmd },
     { event: 'PreToolUse', matcher: 'apply_patch', command: cmd },
   ];
 }
@@ -2655,6 +2742,29 @@ git commit -m "feat(install): merge hooks.json có backup và sidecar, gỡ đú
   - `formatStats(summary) => string`
 
 `doctor` phải nói rõ **rule nào đang tắt và vì sao** — một guardrail im lặng không chạy còn tệ hơn không có guardrail.
+
+**Bổ sung bắt buộc theo Task 0: `doctor` phải phát hiện hook CHƯA ĐƯỢC TIN CẬY.**
+
+Đây là chế độ hỏng nguy hiểm nhất của cả hệ thống: hook đã cài đúng, `hooks.json` đúng, nhưng Codex
+bỏ qua vì chưa grant trust — và **không ai biết**, kể cả dev. Guardrail trông như đang bảo vệ mà thực
+ra không chặn gì. `diagnose` phải kiểm và hạ `ok = false` khi phát hiện:
+
+- Đọc bản ghi trust trong `~/.codex/config.toml` (struct `HookStateToml { enabled, trusted_hash }`).
+- So `trusted_hash` với hash của nội dung hook hiện tại.
+- Không có bản ghi, hoặc hash lệch → in:
+
+  ```
+  ✗ Hook đã cài nhưng CHƯA được Codex tin cậy — guardrail đang KHÔNG chặn gì.
+    Mở Codex CLI, gõ /hooks, rồi cấp tin cậy cho các mục codex-guardrail.
+  ```
+
+- Không đọc được `config.toml` (thiếu file, TOML hỏng) → cảnh báo `⚠ không xác định được trạng thái
+  tin cậy`, **không** báo `✓`. Ở đây im lặng tệ hơn báo động sai.
+
+Cách chính xác Codex tính `trusted_hash` (hash gì, thuật toán nào) **chưa xác định** — Task 0 không đào
+tới đó. Nếu không suy ra được từ `config.toml` thật sau khi grant trust, thì rút về mức thấp hơn nhưng
+vẫn hữu ích: báo trạng thái *có/không có* bản ghi trust cho hook của guardrail, và ghi rõ trong output
+rằng doctor không kiểm được hash. Không được bịa ra kết luận `✓ đã tin cậy` khi chưa kiểm được.
 
 - [ ] **Step 1: Viết test thất bại cho doctor**
 
@@ -2930,7 +3040,7 @@ test(`p95 của một lần gọi hook dưới ${BUDGET_MS}ms`, () => {
   const dir = mkdtempSync(join(tmpdir(), 'guardrail-lat-'));
   mkdirSync(join(dir, '.git'));
   const payload = JSON.stringify({
-    hook_event_name: 'PreToolUse', tool_name: 'shell', cwd: dir,
+    hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd: dir,
     tool_input: { command: 'npm test' },
   });
 

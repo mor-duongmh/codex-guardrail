@@ -1,0 +1,15 @@
+{
+  "session_id": "01a00000-0000-7000-0000-000000000001",
+  "turn_id": "01a00000-0000-7000-0000-000000000002",
+  "transcript_path": "/home/dev/.codex/sessions/2026/01/01/rollout-fixture.jsonl",
+  "cwd": "/home/dev/repo",
+  "model": "gpt-5.6-terra",
+  "permission_mode": "bypassPermissions",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "ls -la"
+  },
+  "tool_response": "total 8\ndrwxr-xr-x  3 dev dev  96 Jan  1 00:00 .\n-rw-r--r--  1 dev dev   9 Jan  1 00:00 a.txt\n",
+  "tool_use_id": "exec-00000000-0000-0000-0000-000000000001"
+}

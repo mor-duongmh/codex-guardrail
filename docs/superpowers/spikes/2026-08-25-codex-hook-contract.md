@@ -1,84 +1,107 @@
 # Spike: hợp đồng hook của Codex
 
-- **Ngày:** 2026-08-25
-- **Task:** Plan 1 / Task 0
-- **Bản Codex đã kiểm:** `codex-cli 0.149.0-alpha.4.3` (binary trong `/Applications/ChatGPT.app/Contents/Resources/codex`)
-- **Trạng thái:** câu hỏi gating ĐÃ trả lời. Phần thu fixture còn dở, chờ grant trust.
+- **Ngày:** 2026-08-25, hoàn tất 2026-08-26
+- **Task:** Plan 1 / Task 0 (gating)
+- **Bản Codex đã kiểm:** `codex-cli 0.149.0-alpha.4.3`, binary trong `/Applications/ChatGPT.app/Contents/Resources/codex`
+- **Trạng thái:** ĐÓNG. Cả ba câu hỏi đã trả lời bằng payload và hành vi thật, không phải suy từ binary.
 
 ## Bối cảnh môi trường — phải biết trước khi đọc kết quả
 
-- `codex` trong PATH là **symlink chết**: `/opt/homebrew/bin/codex` → `/opt/homebrew/Caskroom/codex/0.130.0/codex-aarch64-apple-darwin`, thư mục Caskroom rỗng.
-- Binary thật là bản **0.149.0-alpha.4.3** đi kèm `ChatGPT.app`. Mọi tài liệu morkit viết cho 0.120/0.130 đều có thể lệch.
-- `codex doctor` sạch, `[features] hooks` đang bật (42 cờ). Không có managed config / policy tổ chức nào chặn.
-- `node` do nvm quản lý (`~/.nvm/versions/node/v20.19.2/bin/node`), **không** nằm trên PATH tối thiểu.
+- `codex` trong PATH là **symlink chết**: `/opt/homebrew/bin/codex` → Caskroom 0.130.0 rỗng. Binary thật đi kèm `ChatGPT.app`.
+- Mọi tài liệu morkit viết cho 0.120/0.130 đều có thể lệch so với 0.149.
+- `[features] hooks` đang bật. Config máy này còn dùng tên cũ `codex_hooks` — **deprecated**, runtime in cảnh báo, nên đổi.
+- `node` do nvm quản lý (`~/.nvm/versions/node/v20.19.2/bin/node`), **không** nằm trên PATH tối thiểu → lệnh hook phải dùng đường dẫn node tuyệt đối.
 
-## Câu hỏi 1 (gating): exit code non-zero có chặn thật không?
+## Câu hỏi 1 (gating): PreToolUse có chặn thật không?
 
-**CÓ.** Kết quả **A**, xác nhận từ hai nguồn độc lập:
+**CÓ — cả hai kênh, và lý do tới model nguyên văn.**
 
-- Binary chứa chuỗi `"Command blocked by PreToolUse hook: "`.
-- Tài liệu chính thức (`learn.chatgpt.com/docs/hooks`) nói hook chặn bằng cách "exit with code 2 và ghi lý do vào stderr".
+Kiểm bằng cách bảo Codex chạy `echo LENH_DA_CHAY_MARKER` với hook luôn-chặn:
 
-Kiến trúc hook trong spec **không sụp**. Plan 1 đi tiếp được.
+| Kênh | Lệnh có chạy? | Model thấy lý do? |
+|---|---|---|
+| JSON `permissionDecision: "deny"` + exit 0 | Không | Có |
+| exit code 2 + stderr | Không | Có |
 
-**Nhưng có kênh tốt hơn exit code** — Codex nhận JSON có cấu trúc:
+Cả hai kênh cho ra **cùng một chuỗi** trong luồng model:
 
-```json
-{
-  "hookSpecificOutput": {
-    "hookEventName": "PreToolUse",
-    "permissionDecision": "deny",
-    "permissionDecisionReason": "Destructive command blocked."
-  }
-}
+```
+Command blocked by PreToolUse hook: <lý do>. Command: echo LENH_DA_CHAY_MARKER
 ```
 
-Các struct tương ứng trong binary: `PreToolUseDecisionWire`, `PreToolUseHookSpecificOutputWire`, `PreToolUsePermissionDecisionWire`, với giá trị `approve` / `block` / `allow` / `deny` / `ask`.
+Codex tự thuật lại cho người dùng: *"Không chạy được: lệnh bị guardrail chặn trước khi thực thi."*
+**Dấu tiếng Việt sống nguyên vẹn** qua cả hai kênh → thông điệp chặn viết tiếng Việt được.
 
-→ **Ảnh hưởng plan:** Task 10 nên dùng JSON output làm kênh chính, exit code 2 làm dự phòng. Lý do đi trong trường có cấu trúc, không phụ thuộc Codex có forward stderr hay không. Golden test cho `denyMessage` phải đổi theo.
+**Thông điệp nhiều dòng sống nguyên vẹn.** Kiểm bằng đúng khuôn golden 8 dòng của `denyMessage()`:
+Codex giữ cả thụt lề, dòng trắng và dấu tiếng Việt, rồi model tuân thủ và tự diễn giải lại cho người
+dùng ("*Không chạy được: guardrail chặn `psql` vì đây là thao tác trực tiếp với database. Mình đã dừng,
+không thử cách khác.*"). Một tật nhỏ: Codex nối `. Command: <lệnh>` **ngay sau** reason, nên reason kết
+thúc bằng `.` hoặc newline sẽ ra `CODEOWNERS).. Command:` — bỏ dấu chấm cuối là xong.
+
+→ **Chọn kênh JSON làm chính** (Task 10). Không phải vì nó truyền lý do tốt hơn — hai kênh tương đương — mà vì exit 0 phân biệt được *cố ý chặn* với *hook crash*, để dành exit code khác cho fail-closed nội bộ. Giữ exit 2 làm dự phòng.
 
 ## Câu hỏi 2: hook có tự cháy khi wire vào `~/.codex/hooks.json`?
 
-**KHÔNG, nếu chưa được trust.** Đây là phát hiện lớn nhất của spike.
+**KHÔNG, nếu chưa được trust — và Codex bỏ qua IM LẶNG.**
 
-Tài liệu: *"Non-managed hooks require explicit review before execution. Use `/hooks` in the CLI to inspect sources, review new hooks, and grant trust. Codex tracks trust against each hook's current hash — new or changed hooks are marked for review and skipped until trusted."*
+Tài liệu: *"Non-managed hooks require explicit review before execution. Use `/hooks` in the CLI... Codex tracks trust against each hook's current hash — new or changed hooks are marked for review and skipped until trusted."*
+Struct trong binary: `HookStateToml { enabled, trusted_hash }`.
 
-Chứng cứ khớp:
-- Binary có `bypass_hook_trust`, và struct `HookStateToml { enabled, trusted_hash }` — bản ghi trust là TOML, băm theo nội dung hook.
-- `~/.codex/config.toml` không có mục nào như vậy → chưa grant.
-- Thử thực tế: wire 4 entry (`PreToolUse`/`shell`, `PreToolUse`/`apply_patch`, `PostToolUse`/`shell`, `SessionStart` không matcher), chạy `codex exec` cho nó thực thi `ls -la` → **không entry nào cháy**, kể cả entry không có matcher.
+Đã loại hết giả thuyết khác: không phải PATH (kiểm với `env -i`), không phải sai đường dẫn file, không phải sai schema, không phải cờ tắt, không phải managed policy.
 
-Đã loại các giả thuyết khác:
-- **Không phải PATH.** Lệnh hook được đổi sang đường dẫn node tuyệt đối + marker ghi bằng shell builtin, kiểm với `env -i` (PATH trống) thì chạy tốt.
-- **Không phải sai đường dẫn file.** Tài liệu xác nhận `~/.codex/hooks.json` là một trong bốn nơi Codex đọc (cùng `~/.codex/config.toml`, `<repo>/.codex/hooks.json`, `<repo>/.codex/config.toml`).
-- **Không phải sai schema.** Dạng `{hooks: {PreToolUse: [{matcher, hooks: [{type, command}]}]}}` đúng như ví dụ trong tài liệu.
-- **Không phải cờ tắt.** `hooks` nằm trong danh sách cờ đang bật.
-- **Không phải policy tổ chức.** Không có `managed_config.toml`.
+**Có đường automation chính thức:**
 
-Một chi tiết phụ đáng sửa: config đang dùng `[features] codex_hooks` — **deprecated** ở 0.149, tên mới là `[features] hooks`. Runtime in cảnh báo. Alias vẫn nhận nhưng nên đổi.
+```
+--dangerously-bypass-hook-trust
+    Run enabled hooks without requiring persisted hook trust for this
+    invocation. DANGEROUS. Intended only for automation that already
+    vets hook sources
+```
+
+Chỉ dùng cho spike/CI của chính mình. **Không** đưa vào tài liệu cho dev — bảo dev bypass trust là dạy họ tắt đúng cơ chế bảo vệ họ khỏi hook lạ.
 
 ### Ảnh hưởng plan — ba điểm
 
-1. **`guardrail install` không thể là một lệnh.** Mỗi dev phải tự mở `/hooks` và grant trust. Không tự động hoá được — đó chính là cơ chế ngăn plugin lạ tự cài hook. `install` phải in hướng dẫn này thành bước bắt buộc, và README phải nói rõ.
-2. **Thiết kế hiện tại vô tình đúng ở chỗ quan trọng.** Lệnh hook cố định (`node .../guardrail.mjs hook`), mọi biến động rule nằm trong `codex-guardrail.json` — file *không phải* hook. Trust băm theo nội dung hook nên chỉ phải grant **một lần**; sửa policy về sau không làm đứt trust. Nếu rule nằm trong chính hook command thì mỗi lần đổi rule là cả team phải re-trust.
-3. **Dev không grant trust thì guardrail không bao giờ chạy, và không ai biết.** Thêm một lý do cho tầng CI, và `doctor` (Task 12) phải phát hiện được trạng thái chưa-trust — đọc `trusted_hash` trong `config.toml` và so với hash hook hiện tại.
+1. **`guardrail install` không thể là một lệnh.** Mỗi dev phải tự `/hooks` → grant trust. Không tự động hoá được, và đó là *tính năng* chứ không phải lỗi. `install` phải in bước này thành việc bắt buộc; README nói rõ.
+2. **Thiết kế hiện tại vô tình đúng ở chỗ quan trọng.** Lệnh hook cố định, mọi biến động rule nằm trong `codex-guardrail.json` — file *không phải* hook. Trust băm theo nội dung hook nên grant **một lần**; sửa policy không làm đứt trust. Nếu rule nằm trong hook command thì mỗi lần đổi rule là cả team phải re-trust.
+3. **Dev không grant trust thì guardrail không chạy, và không ai biết.** Thêm lý do cho tầng CI. `doctor` (Task 12) phải phát hiện trạng thái chưa-trust bằng cách so `trusted_hash` với hash hook hiện tại.
 
-## Câu hỏi 3: định dạng payload, stdout ở PostToolUse, tool đọc file
+## Câu hỏi 3: định dạng payload
 
-**CHƯA TRẢ LỜI** — cần grant trust trước mới thu được payload thật.
+Thu bằng `dump-hook.mjs`, chuẩn hoá vào `tests/fixtures/codex-events/`.
 
-Biết trước từ binary (chưa xác nhận bằng payload thật):
-- Trường payload: `session_id`, `turn_id`, `agent_id`, `agent_type`, `transcript_path`, `hook_event_name`, `model`, `permission_mode`, `trigger`, `tool_name`, `tool_input`, `tool_use_id`, `tool_response`.
-- `PostToolUse` **có** `tool_response` → rule `redact.stdout` (Plan 2) khả thi.
-- Có `SessionStartHookSpecificOutputWire` với `additionalContext` → bơm ngữ cảnh cho rule convention (Plan 2) khả thi.
-- Trường cấu hình mỗi hook: `matcher`, `command`, `type`, `timeout` / `timeoutSec`, `async`, `asyncRewake`, `shell`, `statusMessage`, `if`.
-- Event đầy đủ: `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`, `PostCompact`, `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`, `Stop` — **nhiều hơn** danh sách morkit ghi cho 0.130 (có thêm `SessionEnd`, `SubagentStart`, `SubagentStop`).
-- **Tên tool cần xác nhận:** ví dụ trong tài liệu dùng `matcher: "Bash"` (vocab Claude Code), nhưng Codex gọi tool shell là gì thì chưa rõ. Nếu là `Bash` chứ không phải `shell` thì matcher trong Task 11 sai. Đây là việc phải xác nhận bằng payload thật, không đoán.
+Trường thật sự có (PreToolUse/PostToolUse): `session_id`, `turn_id`, `transcript_path`, `cwd`, `hook_event_name`, `model`, `permission_mode`, `tool_name`, `tool_input`, `tool_use_id`; PostToolUse thêm `tool_response`. SessionStart: không có `turn_id`/`tool_*`, có `source` (`startup`).
 
-## Việc còn lại để đóng Task 0
+Bốn điều lệch với giả định trong plan — mỗi điều đều làm sai rule nếu không sửa:
 
-1. Người dùng mở `/Applications/ChatGPT.app/Contents/Resources/codex`, gõ `/hooks`, grant trust cho 4 entry spike.
-2. Bảo Codex chạy `ls -la` và sửa một file; đóng mở lại phiên.
-3. Đọc `~/guardrail-spike/`, xác nhận tên khoá và tên tool, chuẩn hoá thành fixture (thay giá trị thật bằng giá trị vô hại).
-4. Đổi `dump-hook.mjs` → `deny-always.mjs` cho `PreToolUse`/`shell`, xác nhận Codex thật sự chặn và có thấy stderr.
-5. Tháo wiring, xoá `~/guardrail-spike`, restore `~/.codex/hooks.json` từ `.spike-bak`.
+1. **`tool_name` là `Bash`, không phải `shell`.** Vocab Claude Code, không phải vocab Codex như morkit ghi. Matcher trong Task 11 sai → phải sửa. Tool sửa file là `apply_patch`.
+2. **`apply_patch` KHÔNG có field đường dẫn.** `tool_input.command` là nguyên văn patch envelope; đường dẫn nằm trong thân text:
+   `*** Begin Patch` / `*** Add File: <abs>` hoặc `*** Update File: <abs>` / hunk / `*** End Patch`.
+   → `secrets.write-path`, `selfprotect.policy-file`, `selfprotect.hooks-file`, `quality.ci-generated-file` phải **parse envelope** để lấy path, không đọc `tool_input.file_path`.
+3. **Xoá file đi qua `Bash` với `rm`, không qua `apply_patch`.** Quan sát thật: `rm -- xoa.txt`. Envelope có `*** Delete File:` nhưng Codex không chọn đường đó. → self-protect phải bắt cả nhánh Bash.
+4. **Codex nối lệnh bằng `&&` như thói quen, không phải ngoại lệ.** Quan sát thật:
+   `pwd && rg -n --fixed-strings 'dong hai' sua.txt && ls -ld xoa.txt`
+   `rm -- xoa.txt && rg -n 'x' sua.txt && test ! -e xoa.txt`
+   → `lib/tokenize.mjs` **bắt buộc** tách theo `&&`, `||`, `;`, `|` rồi soi từng đoạn. Rule chỉ soi lệnh đầu là lọt ngay ở lượt đầu tiên, không cần ai cố né. Đây là ca test quan trọng nhất của Task 1, không phải ca biên.
+
+Thêm: `cwd` có trong payload → `lib/context.mjs` lấy repo root từ đó, không cần `process.cwd()`. `permission_mode` có sẵn (thấy `bypassPermissions`). `tool_response` là chuỗi thô → `redact.stdout` (Plan 2) khả thi. Matcher là **regex** (`".*"` khớp mọi tool) và **bỏ trống cũng khớp mọi tool**.
+
+Event đầy đủ ở 0.149: `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`, `PostCompact`, `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`, `Stop` — nhiều hơn danh sách morkit ghi cho 0.130.
+
+## Tổng kết ảnh hưởng plan
+
+Kiểm lại plan sau khi có dữ kiện thật: **plan vững hơn dự đoán.** Hai thứ tôi tưởng phải thêm thì
+đã có sẵn — `tokenize.mjs` đã tách `&&`/`||`/`;`/`|` (test `'tách theo ; && || | và newline'`), và
+`context.mjs` đã parse header `*** Update|Add|Delete|Move File:`. Quan sát thật chỉ **xác nhận** hai
+thiết kế đó là đúng chứ không phải phòng xa. Phần thật sự phải sửa hẹp hơn:
+
+| Task | Phải sửa | Trạng thái |
+|---|---|---|
+| Global | Thêm khối hợp đồng hook đã đo; đổi mục "Exit code" thành "Kênh chặn = JSON" | ✅ đã vá |
+| 4, 10, 11 | `tool_name`/matcher/REGISTRY: `shell` → `Bash` | ✅ đã vá (18 chỗ) |
+| 10 | Deny qua JSON `permissionDecision`, hook **luôn** exit 0; test đọc lý do từ stdout; reason không kết bằng dấu chấm/newline | ✅ đã vá |
+| 9 | Self-protect bắt `rm` trên nhánh Bash (xoá file không đi qua `apply_patch`) | ⚠️ còn phải làm khi tới Task 9 |
+| 11 | `install` in bước `/hooks` grant trust như việc bắt buộc; không đề cập cờ bypass trong tài liệu dev | ✅ đã vá |
+| 12 | `doctor` phát hiện hook chưa trust | ✅ đã vá (kèm ghi chú: cách tính `trusted_hash` chưa xác định) |
+
+Fixture: `tests/fixtures/codex-events/` — `session-start`, `pre-bash-simple`, `pre-bash-chained`, `post-bash-simple`, `pre-apply-patch-add`, `pre-apply-patch-update`.
