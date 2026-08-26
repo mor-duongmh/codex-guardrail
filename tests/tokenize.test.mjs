@@ -38,6 +38,8 @@ test('tách theo ; && || | và newline', () => {
   assert.deepEqual(bins('ls && psql'), ['ls', 'psql']);
   assert.deepEqual(bins('ls | grep x'), ['ls', 'grep']);
   assert.deepEqual(bins('ls\npsql'), ['ls', 'psql']);
+  assert.deepEqual(bins('ls; psql'), ['ls', 'psql']);
+  assert.deepEqual(bins('ls || psql'), ['ls', 'psql']);
 });
 
 test('command substitution cũng được phân tích', () => {
@@ -57,4 +59,15 @@ test('chuỗi rỗng hoặc null trả mảng rỗng', () => {
 test('giữ raw để rule khác soi redirection', () => {
   const subs = parseCommand('echo x > .env');
   assert.ok(subs[0].raw.includes('>'));
+});
+
+test('tách 3 lệnh với && (payload thật Codex)', () => {
+  assert.deepEqual(
+    bins('pwd && rg -n --fixed-strings \'dong hai\' sua.txt && ls -ld xoa.txt'),
+    ['pwd', 'rg', 'ls']
+  );
+  assert.deepEqual(
+    bins('rm -- xoa.txt && rg -n \'x\' sua.txt && test ! -e xoa.txt'),
+    ['rm', 'rg', 'test']
+  );
 });
