@@ -136,3 +136,62 @@ test('chặn secret manager commands', () => {
     assert.equal(r.ruleId, 'secrets.manager-read', `ca: ${cmd}`);
   }
 });
+
+test('chặn printenv với tên biến nhạy cảm (có hoặc không gạch dưới)', () => {
+  const mustBlock = [
+    'printenv PASSWORD',
+    'printenv TOKEN',
+    'printenv SECRET',
+    'printenv APIKEY',
+    'printenv DB_PASSWORD',
+    'printenv AWS_SECRET_ACCESS_KEY',
+  ];
+
+  for (const cmd of mustBlock) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'deny', `ca: ${cmd}`);
+    assert.equal(r.ruleId, 'secrets.env-dump', `ca: ${cmd}`);
+  }
+});
+
+test('cho qua printenv với tên biến vô hại', () => {
+  const mustAllow = [
+    'printenv PATH',
+    'printenv HOME',
+    'printenv NODE_ENV',
+    'printenv LANG',
+    'printenv SHELL',
+  ];
+
+  for (const cmd of mustAllow) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'allow', `ca: ${cmd}`);
+  }
+});
+
+test('chặn env bị bọc trong command substitution', () => {
+  const mustBlock = [
+    '$(env)',
+    '`env`',
+    '(env)',
+  ];
+
+  for (const cmd of mustBlock) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'deny', `ca: ${cmd}`);
+    assert.equal(r.ruleId, 'secrets.env-dump', `ca: ${cmd}`);
+  }
+});
+
+test('cho qua command substitution hợp lệ', () => {
+  const mustAllow = [
+    'echo "(env vars)"',
+    'git commit -m "$(date)"',
+    'awk \'{print $1}\'',
+  ];
+
+  for (const cmd of mustAllow) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'allow', `ca: ${cmd}`);
+  }
+});
