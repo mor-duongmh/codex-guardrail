@@ -65,18 +65,25 @@ test('message deny nói đủ ba điều', () => {
 test('không chặn oan khi tên file chỉ nằm trong câu văn', () => {
   assert.equal(evaluate(shell('git commit -m "thêm .env vào gitignore"'), P).decision, 'allow');
 });
-
-test('chặn 9 ca xả env và secret manager', () => {
+test('chặn 15 ca xả env và redirect', () => {
   const mustBlock = [
+    // Bare env/printenv/set
     'env',
     'printenv',
     'set',
+    // env with pipes and redirects (including no-space variants)
     'env | grep SECRET',
     'env > /tmp/dump.txt',
+    'env >/tmp/dump.txt',
+    'env>/tmp/dump.txt',
+    'env>>file',
     'env && cat /tmp/x',
     'ls && env',
+    // printenv with pipes and sensitive vars
     'printenv | grep AWS',
+    'printenv>x',
     'printenv AWS_SECRET_ACCESS_KEY',
+    'printenv DB_PASSWORD',
   ];
 
   for (const cmd of mustBlock) {
@@ -86,17 +93,27 @@ test('chặn 9 ca xả env và secret manager', () => {
   }
 });
 
-test('cho qua 12 ca dùng env/set với tham số hợp lệ', () => {
+test('cho qua 17 ca: env/set hợp lệ, safe env var, git/npm, manager cmd trong message', () => {
   const mustAllow = [
+    // set with arguments
     'set -euo pipefail',
     'set -e',
     'set -x',
+    // env with assignments and command
     'env FOO=1 psql --version',
     'env -u FOO npm test',
+    // printenv with safe variable names
+    'printenv PATH',
+    'printenv HOME',
+    'printenv NODE_ENV',
+    // git and npm scripts
     'git commit -m "set up env"',
+    'git commit -m "please run vault read later"',
+    'git commit -m "kubectl get secret notes"',
     'npm run set-env',
     './scripts/setup-env.sh',
     'npm run env:check',
+    // docker and kubectl with safe flags
     'docker run --env-file .env.example app',
     'kubectl set image dep/app app=img',
     'printf env',
@@ -105,5 +122,17 @@ test('cho qua 12 ca dùng env/set với tham số hợp lệ', () => {
   for (const cmd of mustAllow) {
     const r = evaluate(shell(cmd), P);
     assert.equal(r.decision, 'allow', `ca: ${cmd}`);
+  }
+});
+
+test('chặn secret manager commands', () => {
+  const mustBlock = [
+    'vault read secret/db',
+  ];
+
+  for (const cmd of mustBlock) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'deny', `ca: ${cmd}`);
+    assert.equal(r.ruleId, 'secrets.manager-read', `ca: ${cmd}`);
   }
 });
