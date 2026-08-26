@@ -1,0 +1,58 @@
+{
+  "secrets": {
+    "denyPaths": [
+      "**/.env", "**/.env.*", "**/*.pem", "**/*.key", "**/*.p12", "**/*.pfx",
+      "**/*.jks", "**/id_rsa", "**/id_ed25519", "**/credentials",
+      "**/service-account*.json", "**/.npmrc", "**/.netrc", "**/.git-credentials",
+      "~/.aws/**", "~/.config/gcloud/**", "~/.kube/config", "~/.ssh/**",
+      "~/.docker/config.json"
+    ],
+    "allowPaths": ["**/.env.example", "**/.env.sample", "**/.env.template"]
+  },
+  "infra": {
+    "denyBinaries": [
+      "psql", "mysql", "mysqldump", "mongosh", "mongo", "redis-cli",
+      "aws", "gcloud", "gsutil", "az", "oci", "kubectl", "helm",
+      "terraform", "pulumi", "ansible", "flyctl", "heroku", "vercel",
+      "wrangler", "supabase"
+    ],
+    "allowBinaries": [],
+    "denyPatterns": [
+      "docker\\s+system\\s+prune",
+      "docker\\s+volume\\s+rm",
+      "npm\\s+publish",
+      "rm\\s+-rf\\s+/",
+      "rm\\s+-rf\\s+~"
+    ],
+    "ssh": { "denyHosts": [], "inspectRemoteCommand": true }
+  },
+  "git": {
+    "protectedBranches": ["main", "master", "develop", "release/*"],
+    "commitMessagePattern": "^(feat|fix|chore|docs|test|refactor|perf|ci|build|style|revert)(\\(.+\\))?!?: .+"
+  },
+  "convention": {
+    "lintCommand": "",
+    "lintExtensions": [],
+    "lintTimeoutMs": 15000,
+    "conventionDocs": []
+  },
+  "quality": {
+    "protectedPaths": [
+      ".github/workflows/**", "dist/**", "build/**", "**/*.generated.*",
+      "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "Cargo.lock"
+    ]
+  },
+  "net": {
+    "allowHosts": [
+      "registry.npmjs.org", "pypi.org", "files.pythonhosted.org",
+      "github.com", "raw.githubusercontent.com", "api.github.com", "crates.io"
+    ]
+  },
+  "deps": { "enabled": true },
+  "selfProtect": {
+    "protectedPaths": [
+      "**/codex-guardrail.json", "~/.codex/hooks.json",
+      "~/.codex/config.toml", "~/.codex/guardrail/**"
+    ]
+  }
+}
