@@ -50,9 +50,10 @@
   },
   "deps": { "enabled": true },
   "selfProtect": {
-    "protectedPaths": [
-      "**/codex-guardrail.json", "~/.codex/hooks.json",
-      "~/.codex/config.toml", "~/.codex/guardrail/**"
-    ]
+    "protectedPaths": {
+      "selfprotect.policy-file": ["**/codex-guardrail.json"],
+      "selfprotect.hooks-file": ["~/.codex/hooks.json", "~/.codex/config.toml"],
+      "selfprotect.install-dir": ["~/.codex/guardrail/**"]
+    }
   }
 }
