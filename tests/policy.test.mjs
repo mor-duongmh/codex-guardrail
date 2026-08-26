@@ -84,3 +84,29 @@ test('policy dự án merge vào, deny mặc định vẫn còn', () => {
   assert.ok(policy.infra.allowBinaries.includes('psql'));
   assert.ok(policy.infra.denyBinaries.includes('psql'));
 });
+
+test('override với null thay vì object ở field có trong default thì throw PolicyError', () => {
+  const dir = repo({
+    'codex-guardrail.json': JSON.stringify({ selfProtect: null })
+  });
+  assert.throws(() => loadPolicy(dir), PolicyError);
+});
+
+test('override top-level không phải object thì throw PolicyError', () => {
+  const dir = repo({
+    'codex-guardrail.json': JSON.stringify(false)
+  });
+  assert.throws(() => loadPolicy(dir), PolicyError);
+});
+
+test('override với object đúng kiểu vẫn merge được (hồi quy)', () => {
+  const dir = repo({
+    'codex-guardrail.json': JSON.stringify({
+      infra: { allowBinaries: ['newbin'] }
+    })
+  });
+  const { policy } = loadPolicy(dir);
+  assert.ok(Array.isArray(policy.infra.allowBinaries));
+  assert.ok(policy.infra.allowBinaries.includes('newbin'));
+  assert.ok(policy.infra.denyBinaries.includes('psql'));
+});
