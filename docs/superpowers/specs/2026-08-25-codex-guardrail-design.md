@@ -138,15 +138,21 @@ Hai pattern root phải cho phép dải flag ở **cả hai phía** đường d�
 
 ### 6.3 Git workflow — `PreToolUse: Bash`
 
-Chỉ chạy khi token lệnh đầu là `git` hoặc `gh`. Branch hiện tại lấy bằng `git rev-parse --abbrev-ref HEAD` — gọi lazy, chỉ khi cần.
+Chỉ chạy khi **lệnh hữu hiệu** của segment là `git` hoặc `gh` — tức sau khi bóc wrapper và keyword shell bằng `lib/argv.mjs`, giống `infra` (§6.2). Soi `argv[0]` trần thì `sudo git push --force` và `for b in a b; do git push --force origin $b; done` lọt sạch.
+
+Subcommand phải tìm bằng cách **bỏ qua global option của git và giá trị của chúng** (`-C`, `-c`, `--git-dir`, `--work-tree`, `--namespace`, `--exec-path`). Lấy "token đầu không bắt đầu bằng `-`" thì `git -C /repo push --force` cho subcommand là `/repo`, và MỌI kiểm dựa trên subcommand bị bỏ.
+
+Branch hiện tại lấy bằng `git rev-parse --abbrev-ref HEAD` — gọi lazy, chỉ khi cần, và chạy trong thư mục của `-C` nếu có (kiểm branch của `cwd` cho một repo khác thì vừa chặn oan vừa cho lọt).
 
 | ruleId | Chặn khi |
 |---|---|
 | `git.protected-branch` | `commit` hoặc `push` khi branch hiện tại khớp `git.protectedBranches` |
-| `git.dangerous-flag` | `push --force`, `push --force-with-lease`, `push --delete`, `reset --hard`, `clean -fdx`, `filter-branch`, `tag -d` |
-| `git.no-verify` | Bất kỳ lệnh git có `--no-verify` |
-| `git.commit-message` | `commit -m` với message không khớp `git.commitMessagePattern` |
-| `git.pr-merge` | `gh pr merge` |
+| `git.dangerous-flag` | `push` kèm `--force` / `--force-with-lease` / `--delete` / `--mirror`, hoặc refspec dạng force (`:<ref>` xoá ref, `+<src>:<dst>` force ref); `reset --hard`; `clean -fdx`; `filter-branch`; `tag -d` |
+| `git.no-verify` | Lệnh git có `--no-verify`, hoặc `commit -n` (chỉ `commit`: `push -n` là `--dry-run`, chặn là chặn oan) |
+| `git.commit-message` | `commit` có message không khớp `git.commitMessagePattern`. Message phải đọc được ở cả `-m`, cờ short gộp (`-am`, `-nm`), `--message=<v>`, `--message <v>` |
+| `git.pr-merge` | `gh pr merge` — khớp theo **vị trí** subcommand, không phải `includes('merge')` (`gh pr list --search merge` là lệnh chỉ đọc, chặn là chặn oan) |
+
+Mọi kiểm cờ phải chấp nhận cả short/long/gộp/`=value` cho cùng một ý nghĩa; git nhận hết các dạng đó. Ví dụ đo được: `clean --force -d`, `tag --delete`, `push --force-with-lease=refs/heads/x` đều lọt nếu chỉ so khớp token chính xác một dạng.
 
 `protectedBranches` mặc định: `main`, `master`, `develop`, `release/*`.
 `commitMessagePattern` mặc định: `^(feat|fix|chore|docs|test|refactor|perf|ci|build|style|revert)(\(.+\))?!?: .+` — trùng conventional commits mà morkit `git` skill đang dùng.
@@ -361,6 +367,8 @@ Thiếu bước 2 thì tầng thứ ba (§7) không tồn tại: dev nới polic
 7. **Chặn xoá root bằng regex chưa phủ hết vị trí tham số.** `rm -rf ./build /` (root là tham số thứ hai) lọt, và `~foo` — home của **user khác** — chưa được coi ngang `~`. Cách sửa đúng là kiểm ở mức token thay vì thêm nhánh regex; xem §6.2.
 8. **Cửa thoát `allowBinaries` thô ở mức binary, không ở mức subcommand.** Hệ quả đo được: `npx wrangler dev`, `npx supabase start`, `npx vercel dev`, `npx supabase gen types --local` đều bị chặn — lệnh local, chỉ đọc, chạy nhiều lần mỗi ngày. Dev cần `supabase gen types` buộc phải mở `allowBinaries: ["supabase"]`, tức mở luôn `supabase db reset --linked`. Đây là đường dẫn thực tế tới "dev tắt guardrail". Cần `allowPatterns` (cửa thoát theo subcommand) ở bản sau; giữ thế trận deny-list ở v1 là quyết định có chủ đích, không phải bỏ sót.
 9. **`ssh` lồng hai tầng lọt.** `ssh h1 "ssh h2 psql"` không bị soi, vì lần gọi lồng đã tắt `inspectRemoteCommand` để chống đệ quy vô hạn.
+10. **Escape có thể được cài bền vững qua file rc của shell.** `export` bên trong một tool call KHÔNG lan tới tiến trình Codex nên không dùng được để tự phát escape — đó là chủ ý. Nhưng agent ghi `export CODEX_GUARDRAIL_ALLOW=<ruleId>` vào `~/.zshrc` / `~/.bashrc` / `~/.profile` thì **phiên Codex sau sẽ thừa hưởng**, và các file đó không nằm trong `selfProtect.protectedPaths`. Thêm chúng vào sẽ chặn oan việc sửa dotfile — việc dev làm bình thường. Đây là lý do §7 tồn tại: rule không hiện trong diff chỉ có một tầng bảo vệ.
+11. **Một số lệnh git phá huỷ được cố ý cho qua.** `git branch -D` (reflog cứu được ~90 ngày, và đây là lệnh dọn branch đã merge dùng hằng ngày — chặn là ma sát thật), và `git update-ref -d` cùng họ plumbing (`symbolic-ref`, ...) vì chặn chúng mở ra một họ lệnh không có điểm dừng rõ. Cân rồi loại có chủ đích, không phải bỏ sót.
 
 ## 16. Ẩn số cần spike trước khi code
 
