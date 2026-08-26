@@ -99,12 +99,64 @@ test('che-thừa: git clone --progress không thay đổi', () => {
   assert.equal(redact(cmd), cmd);
 });
 
-test('che-thừa: make -parallelism không thay đổi', () => {
+test('che: make -parallelism=5 (flag dài bị che do ambiguity)', () => {
   const cmd = 'make -parallelism=5';
-  assert.equal(redact(cmd), cmd);
+  assert.ok(!redact(cmd).includes('parallelism'));
+  assert.ok(redact(cmd).includes('-p***'));
 });
 
 test('findSecretKinds case-insensitive cho env variable', () => {
   assert.deepEqual(findSecretKinds('aws_secret_access_key=abc123'), ['env-sensitive']);
   assert.deepEqual(findSecretKinds('AWS_SECRET_ACCESS_KEY=abc123'), ['env-sensitive']);
+});
+
+test('che: mysql -psecret (lowercase)', () => {
+  const cmd = 'mysql -psecret';
+  assert.ok(!redact(cmd).includes('secret'));
+  assert.ok(redact(cmd).includes('-p***'));
+});
+
+test('che: mysql -psecret123 với user', () => {
+  const cmd = 'mysql -uroot -psecret123 db';
+  assert.ok(!redact(cmd).includes('secret123'));
+  assert.ok(redact(cmd).includes('-p***'));
+});
+
+test('che: mysql -p9pass (số đầu)', () => {
+  const cmd = 'mysql -p9pass db';
+  assert.ok(!redact(cmd).includes('9pass'));
+  assert.ok(redact(cmd).includes('-p***'));
+});
+
+test('che: psql --password dạng flag rõ', () => {
+  const cmd = 'psql -h prod-db --password S3cr3tPw -U admin app';
+  assert.ok(!redact(cmd).includes('S3cr3tPw'));
+  assert.ok(redact(cmd).includes('--password ***'));
+});
+
+test('che: mysqldump --password=pass dạng equals', () => {
+  const cmd = 'mysqldump --password=P4ss99 db';
+  assert.ok(!redact(cmd).includes('P4ss99'));
+  assert.ok(redact(cmd).includes('--password=***'));
+});
+
+test('che: terraform -parallelism=5 (flag dài bị che do ambiguity)', () => {
+  const cmd = 'terraform apply -parallelism=5';
+  assert.ok(!redact(cmd).includes('parallelism'));
+  assert.ok(redact(cmd).includes('-p***'));
+});
+
+test('che-thừa: terraform -var=foo không thay đổi', () => {
+  const cmd = 'terraform apply -var=foo';
+  assert.equal(redact(cmd), cmd);
+});
+
+test('che-thừa: aws --profile=prod không thay đổi', () => {
+  const cmd = 'aws --profile=prod s3 ls';
+  assert.equal(redact(cmd), cmd);
+});
+
+test('che-thừa: psql -p 5432 (cổng) không thay đổi', () => {
+  const cmd = 'psql -p 5432 -h db -l';
+  assert.equal(redact(cmd), cmd);
 });

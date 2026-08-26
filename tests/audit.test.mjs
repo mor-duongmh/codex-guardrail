@@ -76,3 +76,30 @@ test('file có quyền 0o600, directory có quyền 0o700 (POSIX only)', async (
   const dirMode = dirStat.mode & parseInt('777', 8);
   assert.equal(dirMode, 0o700, `expected dir mode 0o700, got 0o${dirMode.toString(8)}`);
 });
+
+test('file cũ với chmod lỏng được tự chữa (POSIX only)', async () => {
+  if (platform() === 'win32') return; // Bỏ qua Windows
+  const p = freshAudit();
+  const dir = join(p, '..');
+  const { record } = await import('../lib/audit.mjs');
+
+  // Setup: tạo file với chmod lỏng (0o644), directory với chmod lỏng (0o755)
+  const fs = await import('node:fs');
+  fs.writeFileSync(p, '');
+  chmodSync(p, 0o644);
+  chmodSync(dir, 0o755);
+
+  // Gọi record() - phải tự chữa file/dir
+  record({ decision: 'denied', ruleId: 'x' });
+
+  const fileStat = statSync(p);
+  const dirStat = statSync(dir);
+
+  // Kiểm tra file được tự chữa thành 0o600
+  const fileMode = fileStat.mode & parseInt('777', 8);
+  assert.equal(fileMode, 0o600, `expected file mode 0o600 after heal, got 0o${fileMode.toString(8)}`);
+
+  // Kiểm tra directory được tự chữa thành 0o700
+  const dirMode = dirStat.mode & parseInt('777', 8);
+  assert.equal(dirMode, 0o700, `expected dir mode 0o700 after heal, got 0o${dirMode.toString(8)}`);
+});
