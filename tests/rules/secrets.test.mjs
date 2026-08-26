@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluate } from '../../lib/rules/secrets.mjs';
+import { homedir } from 'node:os';
 import { loadDefaultPolicy } from '../../lib/policy.mjs';
 
 const P = loadDefaultPolicy();
@@ -193,5 +194,68 @@ test('cho qua command substitution hợp lệ', () => {
   for (const cmd of mustAllow) {
     const r = evaluate(shell(cmd), P);
     assert.equal(r.decision, 'allow', `ca: ${cmd}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Regression: `.map(globToRegExp)` truyền INDEX của Array.map vào tham số thứ
+// hai `home` của globToRegExp, nên MỌI pattern `~/...` trong secrets.denyPaths
+// nở ra thành thư mục tên đúng bằng chỉ số (`~/.aws/**` -> `^1\/\.aws\/.*$`) và
+// không khớp gì cả. Đã đo trước khi sửa: cả 10 ca dưới đây LỌT.
+//
+// Hai điều kiện làm test này BẮT được lỗi, cả hai đều cố ý:
+//   1. Đi qua `evaluate(ctx, policy)` với POLICY MẶC ĐỊNH. Test cũ gọi
+//      `globToRegExp` trực tiếp với `home` tường minh nên không bao giờ đi qua
+//      đường `.map` — đó là lý do lỗi sống sót 5 round review của Task 6.
+//   2. Chọn tên file KHÔNG khớp bất kỳ pattern basename nào trong denyPaths.
+//      `~/.aws/credentials` và `~/.ssh/id_rsa` vẫn chặn kể cả khi lỗi còn sống,
+//      nhờ `**/credentials` và `**/id_rsa` trùng khớp tình cờ — chính sự trùng
+//      khớp đó đã CHE lỗi. Nên ở đây dùng `config`, `known_hosts`,
+//      `access_tokens.db`: chúng chỉ có thể bị chặn nhờ pattern `~`.
+const HOME_ONLY = [
+  ['~/.aws/**', '~/.aws/config'],
+  ['~/.config/gcloud/**', '~/.config/gcloud/access_tokens.db'],
+  ['~/.kube/config', '~/.kube/config'],
+  ['~/.ssh/**', '~/.ssh/known_hosts'],
+  ['~/.docker/config.json', '~/.docker/config.json'],
+];
+
+test('chặn đủ 5 đường dẫn ~ trong secrets.denyPaths, dạng ~', () => {
+  for (const [pattern, path] of HOME_ONLY) {
+    const r = evaluate(shell(`cat ${path}`), P);
+    assert.equal(r.decision, 'deny', `pattern ${pattern} không cưỡng chế: cat ${path}`);
+    assert.equal(r.ruleId, 'secrets.read-path', `cat ${path}`);
+  }
+});
+
+test('chặn đủ 5 đường dẫn ~ trong secrets.denyPaths, dạng tuyệt đối $HOME', () => {
+  // Dạng tuyệt đối là đường đi vòng hiển nhiên nhất: agent bị chặn `~/.kube/config`
+  // chỉ cần viết `/Users/<user>/.kube/config`. Đã đo: trước khi sửa cũng LỌT.
+  for (const [pattern, path] of HOME_ONLY) {
+    const abs = homedir() + path.slice(1);
+    const r = evaluate(shell(`cat ${abs}`), P);
+    assert.equal(r.decision, 'deny', `pattern ${pattern} không cưỡng chế: cat ${abs}`);
+    assert.equal(r.ruleId, 'secrets.read-path', `cat ${abs}`);
+  }
+});
+
+test('allowPaths vẫn thắng denyPaths sau khi sửa pattern ~', () => {
+  // Sửa chặn-lọt không được kéo theo chặn oan: `**/.env.*` khớp `.env.example`,
+  // và chỉ allowPaths giữ nó cho qua.
+  for (const cmd of ['cat .env.example', 'cat .env.sample', 'cat .env.template',
+                     'cat sub/dir/.env.example']) {
+    assert.equal(evaluate(shell(cmd), P).decision, 'allow', cmd);
+  }
+});
+
+test('chống chặn oan: thư mục cùng tiền tố và file thường dưới home', () => {
+  // Ranh giới thư mục phải đúng: `~/.awsome` KHÔNG phải `~/.aws`. Và bản thân
+  // thư mục `~/.ssh` (không có `/`) không khớp `~/.ssh/**`, nên `ls ~/.ssh` là
+  // liệt kê tên file — cho qua.
+  for (const cmd of ['cat ~/.awsome/notes.txt', 'cat ~/.sshfoo/x', 'cat ~/.kubernetes/x',
+                     'ls ~/.ssh', 'ls ~/.aws', 'cat ~/.zshrc', 'cat ~/.gitconfig',
+                     'cat ~/.docker/daemon.json', 'cat ~/projects/app/README.md']) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId ?? ''}`);
   }
 });
