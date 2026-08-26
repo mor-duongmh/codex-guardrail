@@ -265,3 +265,71 @@ test('che: --password=value trong double quote chứa khoảng trắng', () => {
   assert.ok(!out.includes('99"'), "phần đuôi sau khoảng trắng không được lộ trần");
   assert.equal(out, 'mysqldump --password=*** db');
 });
+
+// --- Round 5: ba ranh giới coordinator đo được (đóng cả ba theo phán quyết) ---
+// (1) env-sensitive và auth-header dùng chung idiom [^\s]+ với -p/--password —
+//     cùng lớp lỗi, chưa từng được quote-aware hoá.
+// (2) Quote mở nhưng không đóng: round 4 rơi xuống nhánh cũ, lộ phần đuôi.
+//     Round 5: che tới hết chuỗi thay vì rơi xuống nhánh cũ.
+
+test('che: export DB_PASSWORD trong single quote chứa khoảng trắng (đo bởi coordinator)', () => {
+  const cmd = "export DB_PASSWORD='hunter two' && x";
+  const out = redact(cmd);
+  assert.ok(!out.includes('hunter two'));
+  assert.ok(!out.includes("two'"), 'phần đuôi sau khoảng trắng không được lộ trần');
+  assert.equal(out, 'export DB_PASSWORD=*** && x');
+});
+
+test('che: Authorization Bearer nguyên header trong quote (đo bởi coordinator)', () => {
+  const cmd = "curl -H 'Authorization: Bearer a b c'";
+  const out = redact(cmd);
+  assert.ok(!out.includes('a b c'));
+  assert.ok(!out.includes(' b c'), 'phần đuôi sau khoảng trắng đầu không được lộ trần');
+  assert.ok(out.includes('Authorization: Bearer ***'));
+});
+
+test('che: mysql -p với quote không đóng — che tới hết chuỗi (đo bởi coordinator)', () => {
+  const cmd = "mysql -p'chua dong";
+  const out = redact(cmd);
+  assert.ok(!out.includes('chua dong'));
+  assert.ok(!out.includes('dong'), 'không được rơi xuống nhánh cũ và lộ phần đuôi');
+  assert.equal(out, 'mysql -p***');
+});
+
+// --- Round 5: quote không đóng cho các pattern còn lại (nhất quán cùng idiom) ---
+
+test('che: --password=value với quote không đóng — che tới hết chuỗi', () => {
+  const cmd = "mysqldump --password='chua dong db";
+  const out = redact(cmd);
+  assert.ok(!out.includes('chua dong'));
+  assert.equal(out, 'mysqldump --password=***');
+});
+
+test('che: --password value (space) với quote không đóng — che tới hết chuỗi', () => {
+  const cmd = "psql --password 'chua dong -U a";
+  const out = redact(cmd);
+  assert.ok(!out.includes('chua dong'));
+  assert.equal(out, 'psql --password ***');
+});
+
+test('che: env var với quote không đóng — che tới hết chuỗi', () => {
+  const cmd = "export DB_PASSWORD='chua dong";
+  const out = redact(cmd);
+  assert.ok(!out.includes('chua dong'));
+  assert.equal(out, 'export DB_PASSWORD=***');
+});
+
+// --- Round 5: đảm bảo auth-header-quoted không nuốt nội dung không liên quan ---
+
+test('che: Authorization trong quote không nuốt flag phía sau (-d JSON)', () => {
+  const cmd = `curl -H "Authorization: Bearer TOK" -d '{"a":1}' url`;
+  const out = redact(cmd);
+  assert.ok(!out.includes('TOK'));
+  assert.ok(out.includes(`-d '{"a":1}' url`), 'nội dung -d không liên quan phải giữ nguyên');
+});
+
+test('che: Authorization không có quote bao quanh vẫn được che (nhánh bare)', () => {
+  const cmd = 'curl -H Authorization:Bearer abc123 -X POST';
+  const out = redact(cmd);
+  assert.ok(!out.includes('abc123'));
+});
