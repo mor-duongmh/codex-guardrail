@@ -100,7 +100,7 @@ Nếu spike §16.2 cho thấy Codex có tool đọc file riêng ngoài `shell`, 
 
 Mọi `ruleId` dưới đây là danh định ổn định — dùng trong escape, audit log, và message chặn.
 
-### 6.1 Secrets — `PreToolUse: shell`, `PreToolUse: apply_patch`
+### 6.1 Secrets — `PreToolUse: Bash`, `PreToolUse: apply_patch`
 
 | ruleId | Chặn khi |
 |---|---|
@@ -115,12 +115,12 @@ Nguyên tắc `secrets.read-path`: khớp theo **đường dẫn**, không theo 
 
 `allowPaths` mặc định (thắng deny): `**/.env.example`, `**/.env.sample`, `**/.env.template`.
 
-### 6.2 Infra — `PreToolUse: shell`
+### 6.2 Infra — `PreToolUse: Bash`
 
 | ruleId | Chặn khi |
 |---|---|
-| `infra.deny-binary` | Basename của token lệnh nằm trong `infra.denyBinaries` và không nằm trong `infra.allowBinaries` |
-| `infra.deny-pattern` | Command khớp một regex trong `infra.denyPatterns` |
+| `infra.deny-binary` | Basename của **lệnh hữu hiệu** nằm trong `infra.denyBinaries` và không nằm trong `infra.allowBinaries`. "Hữu hiệu" = sau khi bóc dải wrapper mở đầu (`sudo`, `npx`, `bunx`, `pnpm dlx`, …) và keyword shell (`do`, `then`, `(`, `{`, …) — nếu chỉ soi token đầu thì `npx wrangler deploy` và `for f in *; do psql; done` lọt |
+| `infra.deny-pattern` | Regex trong `infra.denyPatterns` khớp **tiền tố lệnh hữu hiệu của từng segment**, không phải substring của command thô. Chạy trên chuỗi thô thì `git commit -m "docker system prune is dangerous"` bị chặn oan. Hệ quả cần biết khi soạn policy: pattern nhắm vào giữa lệnh (ví dụ `drop\s+table` để bắt `psql -c "drop table users"`) sẽ **không bao giờ khớp** |
 | `infra.ssh-deny-host` | Token đích của `ssh`/`scp` khớp `infra.ssh.denyHosts` |
 | `infra.ssh-remote-command` | Phần lệnh sau host của `ssh` vi phạm chính `infra.denyBinaries` / `infra.denyPatterns` |
 
@@ -128,11 +128,15 @@ Nguyên tắc `secrets.read-path`: khớp theo **đường dẫn**, không theo 
 
 Không nằm trong deny mặc định: `sqlite3` (thường là DB local nhúng trong app), `docker` (chỉ chặn lệnh xoá qua `denyPatterns`), `ssh`/`scp` (xử lý riêng bằng `infra.ssh`).
 
-`denyPatterns` mặc định: `docker\s+system\s+prune`, `docker\s+volume\s+rm`, `npm\s+publish`, `rm\s+-rf\s+/` và `rm\s+-rf\s+~`.
+`denyPatterns` mặc định: `docker\s+system\s+prune`, `docker\s+volume\s+rm`, `npm\s+publish`, cộng hai pattern chặn xoá root.
+
+Hai pattern root phải cho phép dải flag ở **cả hai phía** đường dẫn. Lý do đo được: `rm -rf /` trần thì GNU coreutils vốn đã từ chối thi hành, còn dạng thật sự chạy được là `rm -rf --no-preserve-root /` (flag đứng **trước** path) — nếu chỉ neo flag đứng sau thì guardrail chặn dạng vô hại và cho qua dạng gây chết. Các dạng phải chặn: `rm -rf /`, `/*`, `-- /`, `-r -f /`, `--recursive --force /`, `--no-preserve-root /` (trước và sau path), và bản `~` tương ứng. Phải cho qua mọi đường dẫn con: `rm -rf /tmp/build`, `rm -rf <path>/node_modules`, `rm -rf ~/Library/Caches/foo`.
+
+**Giới hạn đã biết của cách dùng regex ở đây:** root nằm ở vị trí tham số thứ hai (`rm -rf ./build /`) vẫn lọt, và `~foo` (home của user khác) chưa được coi ngang `~`. Cách sửa đúng là kiểm ở mức **token** — có token đường dẫn nào bằng đúng `/`, `~` hay `~user` — chứ không thêm nhánh regex. Xem §15.
 
 `infra.ssh` mặc định: `denyHosts: []`, `inspectRemoteCommand: true`. Dự án tự khai host prod vào `denyHosts`.
 
-### 6.3 Git workflow — `PreToolUse: shell`
+### 6.3 Git workflow — `PreToolUse: Bash`
 
 Chỉ chạy khi token lệnh đầu là `git` hoặc `gh`. Branch hiện tại lấy bằng `git rev-parse --abbrev-ref HEAD` — gọi lazy, chỉ khi cần.
 
@@ -155,7 +159,7 @@ Chỉ chạy khi token lệnh đầu là `git` hoặc `gh`. Branch hiện tại 
 - **Không auto-fix.** Sửa file sau lưng Codex làm nó mất đồng bộ với thứ nó tưởng đã viết.
 - Không khai `lintCommand` → nửa "bắt" tự tắt; `doctor` báo rõ đang tắt.
 
-### 6.5 Self-protection — `PreToolUse: shell`, `PreToolUse: apply_patch`
+### 6.5 Self-protection — `PreToolUse: Bash`, `PreToolUse: apply_patch`
 
 Không có rule này thì mọi rule khác chỉ là gợi ý: Codex bị chặn có thể tự nới policy hoặc tháo hook.
 
@@ -178,7 +182,7 @@ Không có rule này thì mọi rule khác chỉ là gợi ý: Codex bị chặn
 
 Ghi chú: lockfile bị chặn ở `apply_patch` để agent không sửa tay, và `deps.install-new` (§6.8) chặn lệnh sinh lockfile mới. Nghĩa là **thêm phụ thuộc mới là việc của người**, không phải của agent — dev tự chạy lệnh cài, hoặc escape một lần có ghi log.
 
-### 6.7 Mạng — `PreToolUse: shell`
+### 6.7 Mạng — `PreToolUse: Bash`
 
 | ruleId | Chặn khi |
 |---|---|
@@ -187,7 +191,7 @@ Ghi chú: lockfile bị chặn ở `apply_patch` để agent không sửa tay, v
 
 `net.allowHosts` mặc định: `registry.npmjs.org`, `pypi.org`, `files.pythonhosted.org`, `github.com`, `raw.githubusercontent.com`, `api.github.com`, `crates.io`.
 
-### 6.8 Dependency — `PreToolUse: shell`
+### 6.8 Dependency — `PreToolUse: Bash`
 
 `ruleId: deps.install-new` — chặn `npm i <pkg>`, `npm install <pkg>`, `yarn add`, `pnpm add`, `pip install <pkg>`, `cargo add`, `go get`, `gem install`.
 
@@ -195,7 +199,7 @@ Không chặn: `npm ci`, `npm install` không tham số, `pip install -r require
 
 `deps.enabled: false` tắt hẳn rule cho dự án đang trong giai đoạn chủ động thêm nhiều phụ thuộc.
 
-### 6.9 Redact — `PostToolUse: shell`
+### 6.9 Redact — `PostToolUse: Bash`
 
 `ruleId: redact.stdout` — quét stdout tìm `AKIA[0-9A-Z]{16}`, `sk-[A-Za-z0-9]{20,}`, `ghp_`/`gho_`/`github_pat_`, JWT (`eyJ...`), `-----BEGIN * PRIVATE KEY-----`, `xox[baprs]-`. Phát hiện → cảnh báo vào stderr, không chặn (đã chạy rồi).
 
@@ -353,6 +357,10 @@ Thiếu bước 2 thì tầng thứ ba (§7) không tồn tại: dev nới polic
 3. **`ssh` chỉ soi được lệnh remote viết thẳng trong command.** ProxyJump, `-F` custom config, hoặc lệnh remote sinh động thì lọt.
 4. **Rule không hiện trong diff chỉ có một tầng bảo vệ** (§7). Không có telemetry ở v1 nên dev tháo hook là không ai biết.
 5. **Guardrail cưỡng chế thứ dự án đã có.** Repo không có lint thì `convention.lint` không có gì để chạy.
+6. **Interpreter đọc được file mà không nêu tên file theo cách rule thấy.** Đo được: `python -c "print(open('.env').read())"` lọt, và `node -e` / `ruby -e` / `perl -e` cũng vậy. Đây là trần cưỡng chế của cách khớp theo đường dẫn, không phải bug vá được: chặn mọi interpreter kèm `-c`/`-e` sinh false positive khổng lồ. Dev cần biết giới hạn này để không tin guardrail quá mức.
+7. **Chặn xoá root bằng regex chưa phủ hết vị trí tham số.** `rm -rf ./build /` (root là tham số thứ hai) lọt, và `~foo` — home của **user khác** — chưa được coi ngang `~`. Cách sửa đúng là kiểm ở mức token thay vì thêm nhánh regex; xem §6.2.
+8. **Cửa thoát `allowBinaries` thô ở mức binary, không ở mức subcommand.** Hệ quả đo được: `npx wrangler dev`, `npx supabase start`, `npx vercel dev`, `npx supabase gen types --local` đều bị chặn — lệnh local, chỉ đọc, chạy nhiều lần mỗi ngày. Dev cần `supabase gen types` buộc phải mở `allowBinaries: ["supabase"]`, tức mở luôn `supabase db reset --linked`. Đây là đường dẫn thực tế tới "dev tắt guardrail". Cần `allowPatterns` (cửa thoát theo subcommand) ở bản sau; giữ thế trận deny-list ở v1 là quyết định có chủ đích, không phải bỏ sót.
+9. **`ssh` lồng hai tầng lọt.** `ssh h1 "ssh h2 psql"` không bị soi, vì lần gọi lồng đã tắt `inspectRemoteCommand` để chống đệ quy vô hạn.
 
 ## 16. Ẩn số cần spike trước khi code
 
