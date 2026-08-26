@@ -16,6 +16,17 @@ test('JSON hỏng thì ném ContextError', () => {
   assert.throws(() => buildContext('{ "tool_name": ', {}), ContextError);
 });
 
+test('payload JSON hợp lệ nhưng không phải object (scalar/mảng/null) thì ném ContextError — không TypeError, không im lặng đoán', () => {
+  for (const raw of ['null', 'true', '42', '"str"', '[]', '{}']) {
+    assert.throws(() => buildContext(raw, {}), ContextError, `raw=${raw} phải ném ContextError`);
+  }
+});
+
+test('object hợp lệ nhưng thiếu hook_event_name thì ném ContextError, không mặc định "unknown"', () => {
+  const payload = JSON.stringify({ tool_name: 'Bash', cwd: '/tmp/demo-repo', tool_input: { command: 'ls' } });
+  assert.throws(() => buildContext(payload, {}), ContextError);
+});
+
 test('payload Bash thật (pre-bash-simple) cho ra event, tool và command', () => {
   const ctx = buildContext(fixture('pre-bash-simple'), {});
   assert.equal(ctx.event, 'PreToolUse');
@@ -114,4 +125,42 @@ test('trích file đích từ unified diff, bỏ /dev/null', () => {
     tool_input: { diff: '--- a/src/a.ts\n+++ b/src/a.ts\n--- x\n+++ /dev/null\n' },
   });
   assert.deepEqual(buildContext(payload, {}).patchFiles, ['src/a.ts']);
+});
+
+test('filesFromPatch bắt đủ bốn verb: Add, Update, Delete, Move (cả "Move File:" và "Move to:")', () => {
+  const wrap = (cmd) => JSON.stringify({
+    hook_event_name: 'PreToolUse',
+    tool_name: 'apply_patch',
+    cwd: '/tmp/demo-repo',
+    tool_input: { command: cmd },
+  });
+
+  assert.deepEqual(
+    buildContext(wrap('*** Begin Patch\n*** Add File: src/a.ts\n+hi\n*** End Patch'), {}).patchFiles,
+    ['src/a.ts']
+  );
+  assert.deepEqual(
+    buildContext(wrap('*** Begin Patch\n*** Update File: src/b.ts\n@@\n-x\n+y\n*** End Patch'), {}).patchFiles,
+    ['src/b.ts']
+  );
+  assert.deepEqual(
+    buildContext(wrap('*** Begin Patch\n*** Delete File: src/c.ts\n*** End Patch'), {}).patchFiles,
+    ['src/c.ts']
+  );
+  assert.deepEqual(
+    buildContext(wrap('*** Begin Patch\n*** Move File: src/d.ts\n*** End Patch'), {}).patchFiles,
+    ['src/d.ts']
+  );
+});
+
+test('filesFromPatch bắt "Move to:" (cú pháp rename thật của apply_patch) — Update File + Move to ra cả hai path', () => {
+  const payload = JSON.stringify({
+    hook_event_name: 'PreToolUse',
+    tool_name: 'apply_patch',
+    cwd: '/tmp/demo-repo',
+    tool_input: {
+      command: '*** Begin Patch\n*** Update File: src/old.ts\n*** Move to: src/new.ts\n@@\n-x\n+y\n*** End Patch',
+    },
+  });
+  assert.deepEqual(buildContext(payload, {}).patchFiles.sort(), ['src/new.ts', 'src/old.ts']);
 });
