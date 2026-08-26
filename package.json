@@ -5,7 +5,7 @@
   "bin": { "guardrail": "./bin/guardrail.mjs" },
   "engines": { "node": ">=20" },
   "scripts": {
-    "test": "node --test tests/",
+    "test": "node --test",
     "test:latency": "node --test tests/latency.test.mjs"
   },
   "files": ["bin", "lib", "policy"]
