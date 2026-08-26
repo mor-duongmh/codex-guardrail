@@ -196,3 +196,129 @@ test('rm -rf chỉ chặn đúng root, cho qua đường dẫn con', () => {
     assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.reason ?? ''}`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// C1: splitSegments tách theo `;`/`&&` nên từ khoá điều khiển rơi vào ĐẦU
+// segment (`do psql -f $f`), và ngoặc nhóm lệnh dính vào token (`(psql`, `/)`).
+// Trước fix, TOÀN BỘ denylist không được cưỡng chế bên trong bất kỳ vòng lặp
+// hay subshell nào — đo được: mọi ca dưới đây đều LỌT.
+test('C1: vòng lặp / subshell / negation không vô hiệu hoá rule', () => {
+  for (const cmd of [
+    'for f in *.sql; do psql -f $f; done',
+    'if [ -f a ]; then psql -l; fi',
+    'while read l; do psql -c "$l"; done < q.txt',
+    'for d in */; do terraform apply; done',
+    'for f in *; do npx wrangler deploy; done',
+    '(psql -l)',
+    '{ psql -l; }',
+    '! psql -l',
+    '(sudo psql -l)',
+  ]) {
+    assert.equal(evaluate(shell(cmd), P).ruleId, 'infra.deny-binary', `phải chặn: ${cmd}`);
+  }
+  // Ngoặc đóng dính vào token cuối phá neo `$` của pattern rm.
+  for (const cmd of ['(cd /app && rm -rf /)', 'if true; then rm -rf /; fi',
+                     '( rm -rf / )', '{ rm -rf /; }']) {
+    assert.equal(evaluate(shell(cmd), P).ruleId, 'infra.deny-pattern', `phải chặn: ${cmd}`);
+  }
+});
+
+// Khớp từ khoá phải TUYỆT ĐỐI theo token: `do_something` là lệnh thật.
+test('C1: token giống từ khoá shell và ngoặc trong tham số không bị chặn oan', () => {
+  for (const cmd of [
+    'do_something --flag', 'thenable --x', 'elifier build', 'elsewhere run',
+    'dotool --list', './do --help', 'make do', 'npm run do', 'npm run then',
+    'for d in */; do npm ci; done',
+    'for f in *.ts; do npx tsc --noEmit $f; done',
+    'for f in *.log; do rm -f $f; done',
+    'if [ -f package.json ]; then npm test; fi',
+    'if [ -d node_modules ]; then rm -rf node_modules; fi',
+    'while read l; do echo $l; done < list.txt',
+    '{ npm ci; npm test; }',
+    '(cd web && npm run build)',
+    '(cd /app && rm -rf ./dist)',
+    '(cd /app && rm -rf /tmp/cache)',
+    'if true; then rm -rf ./build; fi',
+    'for d in */; do (cd $d && git pull); done',
+    '! grep -q foo file', '! test -f a.txt',
+    '(git status)', '{ git log --oneline -5; }',
+    'rm -rf "My Folder (old)"', 'rm -rf "backup (1)"', 'echo "(psql)"',
+    'git commit -m "fix(infra): do psql lookup"', 'grep -rn "do psql" docs/',
+    "find . -name '*.log' -exec rm -rf {} \\;", 'find . -name "*.tmp" -delete',
+  ]) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId} ${r.reason ?? ''}`);
+  }
+});
+
+// C2: `rm -rf /` trần là dạng GNU coreutils TỪ CHỐI thi hành, còn mọi dạng
+// CHẠY ĐƯỢC (flag đứng trước path, flag tách rời, --no-preserve-root) thì lọt.
+// Tức trước fix guardrail chặn dạng vô hại và cho qua dạng gây chết.
+test('C2: rm root chặn được cả khi flag đứng trước path hoặc tách rời', () => {
+  for (const cmd of [
+    'rm -rf --no-preserve-root /', 'rm --no-preserve-root -rf /',
+    'rm -r -f /', 'rm -f -r /', 'rm -rf -v /', 'rm --recursive --force /',
+    'sudo rm -rf --no-preserve-root /', 'rm -rf --no-preserve-root ~',
+    'rm -rf -- /', 'rm --no-preserve-root -rf /*',
+  ]) {
+    assert.equal(evaluate(shell(cmd), P).ruleId, 'infra.deny-pattern', `phải chặn: ${cmd}`);
+  }
+});
+
+test('C2: rm có dải flag nhưng đích không phải root thì cho qua', () => {
+  for (const cmd of [
+    'rm -rf -- ./dist', 'rm -rf -- /tmp/x', 'rm -i -r /tmp/x',
+    'rm -rf --preserve-root=all /tmp/x', 'rm --recursive --force ./dist',
+    'rm -r -f ./node_modules', 'rm -f -r /tmp/build', 'rm -rf -v ./coverage',
+    'rm --recursive --force /var/tmp/x', 'rm -rf ~/.cache/pip',
+    'rm -rf -- ~/tmp/x', 'rm -rf --one-file-system ./dist',
+  ]) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId} ${r.reason ?? ''}`);
+  }
+});
+
+// C3: hostname DNS không phân biệt hoa thường (RFC 4343) → chỉ cần giữ Shift
+// là thoát một deny-list có hợp đồng "không được chạm, kể cả chỉ để xem".
+test('C3: denyHosts không phân biệt hoa thường, bỏ dấu chấm gốc cuối FQDN', () => {
+  const p = mergePolicy(P, { infra: { ssh: { denyHosts: ['*.italent.asia', 'prod'] } } });
+  for (const cmd of ['ssh API.ITALENT.ASIA uptime', 'ssh Prod uptime',
+                     'scp a.txt PROD:/tmp/', 'ssh api.italent.asia. uptime',
+                     'ssh Ubuntu@Api.Italent.Asia uptime']) {
+    assert.equal(evaluate(shell(cmd), p).ruleId, 'infra.ssh-deny-host', `phải chặn: ${cmd}`);
+  }
+  // Chuẩn hoá phải áp cho CẢ HAI phía: pattern viết hoa vẫn khớp host viết thường.
+  const pUp = mergePolicy(P, { infra: { ssh: { denyHosts: ['*.ITALENT.ASIA', 'PROD'] } } });
+  for (const cmd of ['ssh api.italent.asia uptime', 'ssh prod uptime']) {
+    assert.equal(evaluate(shell(cmd), pUp).ruleId, 'infra.ssh-deny-host', `phải chặn: ${cmd}`);
+  }
+  assert.equal(evaluate(shell('ssh Admin-Desktop uptime'), p).decision, 'allow');
+});
+
+// Chốt bộ lọc `a.includes(':')` trong scpHosts: bỏ nó thì mutation testing
+// không làm đỏ test nào, nhưng nó chắn một chặn oan THẬT — tên file local
+// trùng tiền tố deny-host bị hiểu là host.
+test('scp: token không có ":" là tên file local, không phải host', () => {
+  const p = mergePolicy(P, { infra: { ssh: { denyHosts: ['prod*'] } } });
+  for (const cmd of ['scp prod-dump.sql myhost:/tmp/',
+                     'scp ./prod-backup.tar.gz box:/tmp/',
+                     'scp prod.sql prod-notes.txt staging:/tmp/']) {
+    const r = evaluate(shell(cmd), p);
+    assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId} ${r.reason ?? ''}`);
+  }
+  assert.equal(evaluate(shell('scp dump.sql prod-1:/tmp/'), p).ruleId, 'infra.ssh-deny-host');
+});
+
+// denyPatterns là data dùng chung cho mọi dự án: thiếu ranh giới từ thì
+// `npm publishy` / `docker volume rmi` bị chặn oan.
+test('deny-pattern có ranh giới từ ở cuối', () => {
+  for (const cmd of ['npm publishy', 'docker volume rmi', 'docker system pruner',
+                     'npm publish-please --dry-run', 'docker volume rm-helper']) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId} ${r.reason ?? ''}`);
+  }
+  for (const cmd of ['npm publish', 'npm publish --dry-run', 'docker volume rm data',
+                     'docker system prune -af', 'docker system prune']) {
+    assert.equal(evaluate(shell(cmd), P).ruleId, 'infra.deny-pattern', `phải chặn: ${cmd}`);
+  }
+});

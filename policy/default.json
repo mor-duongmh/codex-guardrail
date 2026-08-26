@@ -18,11 +18,11 @@
     ],
     "allowBinaries": [],
     "denyPatterns": [
-      "docker\\s+system\\s+prune",
-      "docker\\s+volume\\s+rm",
-      "npm\\s+publish",
-      "rm\\s+-\\S*[rR]\\S*\\s+/+\\*?(\\s+.*)?$",
-      "rm\\s+-\\S*[rR]\\S*\\s+~/*\\*?(\\s+.*)?$"
+      "docker\\s+system\\s+prune(?![\\w-])",
+      "docker\\s+volume\\s+rm(?![\\w-])",
+      "npm\\s+publish(?![\\w-])",
+      "rm\\s+(?:-\\S+\\s+)*-\\S*[rR]\\S*\\s+(?:-\\S+\\s+)*/+\\*?(\\s+.*)?$",
+      "rm\\s+(?:-\\S+\\s+)*-\\S*[rR]\\S*\\s+(?:-\\S+\\s+)*~/*\\*?(\\s+.*)?$"
     ],
     "ssh": { "denyHosts": [], "inspectRemoteCommand": true }
   },
