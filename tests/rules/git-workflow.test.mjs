@@ -586,7 +586,6 @@ test('F2: refspec có dấu hai chấm ở giữa vẫn là push thường', () 
     'git push origin HEAD:refs/heads/x',
     'git push origin feat/x:feat/x',
     'git push origin refs/heads/feat/x:refs/heads/feat/x',
-    'git push origin +feat/x:feat/x',
     'git push origin HEAD:feat/x',
     'git push upstream feat/x:review/feat-x',
     'git push origin v1.0.0:v1.0.0',
@@ -618,6 +617,53 @@ test('F3: chặn push --mirror', () => {
   }
   // `--mirror` của lệnh KHÁC không phải push thì không liên quan.
   for (const cmd of ['git clone --mirror https://x/y.git', 'git remote add --mirror=fetch x y']) {
+    const r = evaluate(shell(cmd), P, onBranch('feat/x'));
+    assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId} ${r.reason ?? ''}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// F4: tiền tố `+` của refspec CHÍNH LÀ force theo đặc tả git — `+A:B` cập nhật
+// ref đích kể cả khi không fast-forward. Rule đã chặn `--force`, nên đây là
+// dạng viết còn lại của cùng ý nghĩa, và là thứ tài liệu git chỉ ra cho người
+// bị chặn ở dạng cờ. Đo được trước fix: LỌT.
+// ---------------------------------------------------------------------------
+
+test('F4: chặn refspec force dạng "+<src>:<dst>"', () => {
+  for (const cmd of [
+    'git push origin +main:main',
+    'git push origin +feat/x:feat/x',
+    'git push origin +refs/heads/main:refs/heads/main',
+    'git push origin +HEAD:refs/heads/main',
+    'git push origin +refs/tags/v1.0.0:refs/tags/v1.0.0',
+    'git push upstream +main',
+    'git -C /repo push origin +main:main',
+    'if git push origin +main:main; then echo ok; fi',
+  ]) {
+    assert.equal(evaluate(shell(cmd), P, onBranch('feat/x')).ruleId, 'git.dangerous-flag',
+      `phải chặn: ${cmd}`);
+  }
+});
+
+// `+` chỉ có nghĩa force ở refspec của `git push`. Ở `git fetch` nó ghi đè
+// remote-tracking ref của LOCAL — vô hại và có mặt trong hầu hết cấu hình CI.
+test('F4: refspec không có `+` đứng đầu, và `+` ở lệnh khác, vẫn cho qua', () => {
+  for (const cmd of [
+    'git push origin main:main',
+    'git push origin HEAD:refs/heads/x',
+    'git push origin feat/x:feat/x',
+    'git push',
+    'git push -u origin feat/x',
+    'git push --tags',
+    'git push origin --dry-run',
+    'git fetch origin main:main',
+    'git fetch origin +main:main',
+    'git fetch origin +refs/heads/*:refs/remotes/origin/*',
+    'git config remote.origin.fetch +refs/heads/*:refs/remotes/origin/*',
+    'git commit -m "docs: nói về git push origin +main:main"',
+    // Dấu hai chấm trần: cố ý để lọt từ round trước, giữ nguyên hành vi.
+    'git push origin :',
+  ]) {
     const r = evaluate(shell(cmd), P, onBranch('feat/x'));
     assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId} ${r.reason ?? ''}`);
   }
