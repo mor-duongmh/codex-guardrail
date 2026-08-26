@@ -51,6 +51,22 @@ if (sub === 'hook') {
   // exitCode không có ngưỡng nào để vượt, và giữ một nếp cho cả file thì không ai
   // phải nhớ "nhánh nào thì được dùng exit()".
   process.exitCode = res.ok ? 0 : 1;
+} else if (sub === 'doctor') {
+  const { diagnose } = await import('../lib/doctor.mjs');
+  const res = diagnose(process.cwd());
+  process.stdout.write(`${res.lines.join('\n')}\n`);
+  // Vẫn là process.exitCode, không process.exit(). Output của doctor dài hơn
+  // install nhiều vì có cả khối trust, và trên macOS stdout khi là pipe ghi
+  // không đồng bộ — exit() cắt cụt (đã đo: 8192/300000 byte). `guardrail doctor
+  // | tee log` mất chẩn đoán là mất đúng thứ duy nhất subcommand này sinh ra.
+  process.exitCode = res.ok ? 0 : 1;
+} else if (sub === 'stats') {
+  const { readEntries } = await import('../lib/audit.mjs');
+  const { summarize, formatStats } = await import('../lib/stats.mjs');
+  process.stdout.write(formatStats(summarize(readEntries())));
+  // Bảng rỗng không phải lỗi: `stats` chỉ báo cáo, việc phán "có vấn đề" là của
+  // doctor. Trả mã khác 0 ở đây sẽ làm mọi `guardrail stats` trong CI đỏ oan.
+  process.exitCode = 0;
 } else {
   process.stderr.write(USAGE);
   process.exitCode = 1;
