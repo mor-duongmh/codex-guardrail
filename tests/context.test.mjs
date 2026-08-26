@@ -42,6 +42,31 @@ test('payload apply_patch thật (Update File) trích đúng file đích từ to
   assert.deepEqual(ctx.patchFiles, ['/home/dev/repo/sua.txt']);
 });
 
+test('apply_patch (Add File) không rò patch envelope vào ctx.command — envelope chỉ có ở patchBody', () => {
+  const ctx = buildContext(fixture('pre-apply-patch-add'), {});
+  assert.equal(ctx.command, null);
+  // hồi quy: patchFiles và patchBody không bị ảnh hưởng bởi việc null hoá command
+  assert.deepEqual(ctx.patchFiles, ['/home/dev/repo/hello.txt']);
+  assert.ok(typeof ctx.patchBody === 'string' && ctx.patchBody.includes('Add File'));
+});
+
+test('apply_patch (Update File) không rò patch envelope vào ctx.command — envelope chỉ có ở patchBody', () => {
+  const ctx = buildContext(fixture('pre-apply-patch-update'), {});
+  assert.equal(ctx.command, null);
+  // hồi quy: patchFiles và patchBody không bị ảnh hưởng bởi việc null hoá command
+  assert.deepEqual(ctx.patchFiles, ['/home/dev/repo/sua.txt']);
+  assert.ok(typeof ctx.patchBody === 'string' && ctx.patchBody.includes('Update File'));
+});
+
+test('Bash thật (pre-bash-simple, pre-bash-chained) vẫn có ctx.command là chuỗi lệnh — null hoá apply_patch không lan sang nhánh Bash', () => {
+  const simple = buildContext(fixture('pre-bash-simple'), {});
+  assert.equal(simple.command, 'ls -la');
+
+  const chained = buildContext(fixture('pre-bash-chained'), {});
+  assert.equal(typeof chained.command, 'string');
+  assert.ok(chained.command.includes('&&'));
+});
+
 test('payload PostToolUse thật (post-bash-simple) trích được stdout từ tool_response dạng chuỗi thô', () => {
   const ctx = buildContext(fixture('post-bash-simple'), {});
   assert.equal(ctx.event, 'PostToolUse');
