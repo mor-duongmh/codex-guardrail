@@ -322,3 +322,50 @@ test('deny-pattern có ranh giới từ ở cuối', () => {
     assert.equal(evaluate(shell(cmd), P).ruleId, 'infra.deny-pattern', `phải chặn: ${cmd}`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// F1: `if`/`while`/`until` mở ĐIỀU KIỆN, và điều kiện là một lệnh chạy thật.
+// Đo được trước fix: `if psql -l; then echo ok; fi` LỌT, vì SHELL_KEYWORDS chỉ
+// có dải `do`/`then` nên segment điều kiện bị coi là lệnh tên `if`.
+// ---------------------------------------------------------------------------
+
+test('F1: denylist được cưỡng chế ở vị trí điều kiện của if/while/until', () => {
+  for (const cmd of [
+    'if psql -l; then echo ok; fi',
+    'while psql -l; do sleep 1; done',
+    'until psql -l; do sleep 1; done',
+    'if ! psql -l; then echo ok; fi',
+    'if aws s3 ls; then echo ok; fi',
+    'until kubectl get pods; do sleep 1; done',
+    'if docker system prune -af; then echo ok; fi',
+    'if npm test; then terraform apply; fi',
+  ]) {
+    assert.equal(evaluate(shell(cmd), P).decision, 'deny', `phải chặn: ${cmd}`);
+  }
+});
+
+// Bằng chứng khớp TUYỆT ĐỐI theo token, không phải theo tiền tố: `ifconfig`,
+// `iftop`, `docker` là binary THẬT bắt đầu bằng một từ khoá.
+// Đã đo bản thí nghiệm prefix-match: nó ĂN LUÔN tên lệnh — `ifconfig` -> [],
+// `docker system prune -af` -> `system prune -af` — nên sai theo hướng LỌT, chứ
+// không phải chặn oan. Chốt đỏ cho hướng đó nằm ở các test docker của Task 7
+// cộng test F1 ngay trên (thử prefix-match: 5 test đỏ). Danh sách dưới ghim
+// rằng các token này là LỆNH THẬT, không phải từ khoá để bóc.
+test('F1: binary trùng tiền tố if/while/until không bị chặn oan', () => {
+  for (const cmd of [
+    'ifconfig', 'ifconfig en0', 'ifconfig -a', 'iftop', 'iftop -i en0',
+    'ifup en0', 'ifdown en0', 'ifstat', 'untilx --y', 'whileloop.sh',
+    'docker ps', 'doctl compute ls', 'dotool click',
+    'if [ -f a ]; then npm test; fi',
+    'if npm test; then npm run build; fi',
+    'while read l; do echo $l; done < f.txt',
+    'until nc -z localhost 5432; do sleep 1; done',
+    'if ! test -d node_modules; then npm ci; fi',
+    'if command -v psql; then echo có; fi',
+    'echo "if psql -l; then echo ok; fi"',
+    'grep -rn "if psql -l" docs/',
+  ]) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId} ${r.reason ?? ''}`);
+  }
+});

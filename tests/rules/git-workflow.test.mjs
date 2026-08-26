@@ -511,3 +511,114 @@ test('apply_patch không có command thì cho qua và không spawn git', () => {
   assert.equal(evaluate(ctx, P, deps).decision, 'allow');
   assert.equal(called, false);
 });
+
+// ---------------------------------------------------------------------------
+// F1: `if`/`while`/`until` mở ĐIỀU KIỆN, và điều kiện là một lệnh chạy thật.
+// Đo được trước fix: cả hai ca dưới LỌT, vì SHELL_KEYWORDS chỉ có dải
+// `do`/`then` nên segment điều kiện bị coi là lệnh tên `if`/`while`.
+// Đúng Critical 1 của Task 7 tái diễn ở vị trí điều kiện.
+// ---------------------------------------------------------------------------
+
+test('F1: cờ nguy hiểm bị chặn cả ở vị trí điều kiện của if/while/until', () => {
+  for (const cmd of [
+    'if git push --force; then echo ok; fi',
+    'while ! git push --force; do sleep 1; done',
+    'until git push --force; do sleep 1; done',
+    'if ! git push --force-with-lease; then echo ok; fi',
+    'if git reset --hard HEAD~3; then echo ok; fi',
+    'while git push --delete origin feat/x; do sleep 1; done',
+    'elif git push --force; then echo ok; fi',
+  ]) {
+    assert.equal(evaluate(shell(cmd), P, onBranch('feat/x')).decision, 'deny',
+      `phải chặn: ${cmd}`);
+  }
+});
+
+// Bằng chứng khớp TUYỆT ĐỐI theo token, không phải theo tiền tố: `ifconfig`,
+// `iftop`, `docker` là binary THẬT bắt đầu bằng một từ khoá.
+// Đã đo bản thí nghiệm prefix-match: nó ĂN LUÔN tên lệnh — `ifconfig` -> [],
+// `docker system prune -af` -> `system prune -af` — nên sai theo hướng LỌT, chứ
+// không phải chặn oan. Chốt đỏ cho hướng đó là các test docker của Task 7 trong
+// infra.test.mjs (thử prefix-match: 5 test đỏ). Danh sách dưới ghim rằng các
+// token này là LỆNH THẬT, không phải từ khoá để bóc.
+test('F1: binary trùng tiền tố if/while/until không bị chặn oan', () => {
+  for (const cmd of [
+    'ifconfig', 'ifconfig en0', 'iftop -i en0', 'iftop', 'ifup en0',
+    'untilx --y', 'whileloop.sh', 'docker ps', 'dotool click',
+    'if [ -f a ]; then npm test; fi',
+    'if npm test; then npm run build; fi',
+    'while read l; do echo $l; done < f.txt',
+    'until nc -z localhost 5432; do sleep 1; done',
+    'if git diff --quiet; then npm test; fi',
+    'if ! git rev-parse --verify HEAD; then echo empty; fi',
+    'while git status; do sleep 1; done',
+    'echo "if git push --force; then echo ok; fi"',
+    'grep -rn "if git push --force" docs/',
+  ]) {
+    const r = evaluate(shell(cmd), P, onBranch('feat/x'));
+    assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId} ${r.reason ?? ''}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// F2: refspec `:<ref>` là cách viết TƯƠNG ĐƯƠNG CHÍNH XÁC với `push --delete`,
+// mà `--delete` thì rule đã cam kết chặn. Đo được trước fix: LỌT.
+// ---------------------------------------------------------------------------
+
+test('F2: chặn refspec xoá ref dạng ":<ref>"', () => {
+  for (const cmd of [
+    'git push origin :feat/x',
+    'git push origin :refs/heads/feat/x',
+    'git push origin :v1.0.0',
+    'git push upstream :feat/x',
+    'git -C /repo push origin :feat/x',
+    'if git push origin :feat/x; then echo ok; fi',
+  ]) {
+    assert.equal(evaluate(shell(cmd), P, onBranch('feat/x')).ruleId, 'git.dangerous-flag',
+      `phải chặn: ${cmd}`);
+  }
+});
+
+// Dấu hai chấm ở GIỮA là push thường (`<src>:<dst>`) và cực phổ biến trong
+// script CI. Chặn oan ở đây là dev không push được.
+test('F2: refspec có dấu hai chấm ở giữa vẫn là push thường', () => {
+  for (const cmd of [
+    'git push origin HEAD:refs/heads/x',
+    'git push origin feat/x:feat/x',
+    'git push origin refs/heads/feat/x:refs/heads/feat/x',
+    'git push origin +feat/x:feat/x',
+    'git push origin HEAD:feat/x',
+    'git push upstream feat/x:review/feat-x',
+    'git push origin v1.0.0:v1.0.0',
+    'git fetch origin +refs/heads/*:refs/remotes/origin/*',
+    'git show HEAD:lib/argv.mjs',
+    'git log --grep=":feat/x"',
+    'git commit -m "docs: nói về git push origin :feat/x"',
+  ]) {
+    const r = evaluate(shell(cmd), P, onBranch('feat/x'));
+    assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId} ${r.reason ?? ''}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// F3: `--mirror` đẩy mọi ref VÀ xoá ref trên remote không còn ở local — thực
+// chất là force-push toàn bộ repo. Đo được trước fix: LỌT.
+// ---------------------------------------------------------------------------
+
+test('F3: chặn push --mirror', () => {
+  for (const cmd of [
+    'git push --mirror',
+    'git push --mirror origin',
+    'git push origin --mirror',
+    'git -C /repo push --mirror origin',
+    'if git push --mirror; then echo ok; fi',
+  ]) {
+    assert.equal(evaluate(shell(cmd), P, onBranch('feat/x')).ruleId, 'git.dangerous-flag',
+      `phải chặn: ${cmd}`);
+  }
+  // `--mirror` của lệnh KHÁC không phải push thì không liên quan.
+  for (const cmd of ['git clone --mirror https://x/y.git', 'git remote add --mirror=fetch x y']) {
+    const r = evaluate(shell(cmd), P, onBranch('feat/x'));
+    assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId} ${r.reason ?? ''}`);
+  }
+});
