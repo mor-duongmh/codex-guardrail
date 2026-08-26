@@ -113,7 +113,16 @@ Nguyên tắc `secrets.read-path`: khớp theo **đường dẫn**, không theo 
 
 `denyPaths` mặc định: `**/.env`, `**/.env.*`, `**/*.pem`, `**/*.key`, `**/*.p12`, `**/*.pfx`, `**/*.jks`, `**/id_rsa`, `**/id_ed25519`, `**/credentials`, `**/service-account*.json`, `**/.npmrc`, `**/.netrc`, `**/.git-credentials`, `~/.aws/**`, `~/.config/gcloud/**`, `~/.kube/config`, `~/.ssh/**`, `~/.docker/config.json`.
 
-`allowPaths` mặc định (thắng deny): `**/.env.example`, `**/.env.sample`, `**/.env.template`.
+`allowPaths` mặc định (thắng deny): `**/.env.example`, `**/.env.sample`, `**/.env.template`, `~/.ssh/known_hosts`, `~/.ssh/config`, `**/*.pub`.
+
+Ba mục `~/.ssh` cuối là **cần thiết, không phải nới lỏng tuỳ tiện**: `~/.ssh/**` phải ở lại trong `denyPaths` vì nó là catch-all duy nhất cho khoá riêng đặt tên tuỳ ý (`id_ecdsa`, `deploy_key`, tên tự chọn) mà không pattern basename nào phủ. Nhưng nó kéo theo chặn oan `cat ~/.ssh/id_rsa.pub` (khoá **công khai**), `cat ~/.ssh/known_hosts` (fingerprint host, công khai theo thiết kế), `cat ~/.ssh/config` (alias host, không phải credential), và `ssh-keyscan gh.com >> ~/.ssh/known_hosts` (thiết lập dev/CI thường ngày). Mối lo "đừng chạm host prod" do `infra.ssh.denyHosts` xử lý riêng (§6.2), không phải việc của rule này.
+
+**Quy tắc thường trực: KHÔNG dùng `**` trong `secrets.allowPaths`.** allowPaths thắng denyPaths, và `normalizePath` KHÔNG giải `.`/`..` (đo được: `~/.aws/./config` giữ nguyên `./`) trong khi `matchesAny` so chuỗi thô. Một entry allow hình `**` nằm trong cây deny vì vậy mở ra đường đi xuyên: đo được `~/.kube/cache/**` trong allowPaths làm `cat ~/.kube/cache/../config` lật từ deny thành **allow**. Các carve-out `~/.ssh` hiện có an toàn đúng vì chúng một cấp (`*.pub`) hoặc chính xác, không phải `**`.
+
+`denyPaths` nên dùng cây `**` chứ đừng dùng pattern chính xác cho thư mục chứa credential. Lý do đo được: `~/.kube/config` dạng chính xác để lọt `~/.kube/config.bak`, `config.old`, `kubeconfig-staging`, `configs/prod.yaml` — bản sao lưu kubeconfig chứa đúng cert và token như bản gốc, và `cp ~/.kube/config ~/.kube/config.bak` là việc người ta làm trước khi đổi context. Cây `**` cũng khép luôn dạng `./` (đo: `~/.aws/./config` bị chặn nhờ `~/.aws/**`), thứ mà pattern chính xác không làm được.
+
+**Bẫy cài đặt đã gây ra một lỗ an ninh thật, ghi lại để không tái diễn:** compile glob bằng `paths.map(globToRegExp)` là SAI — `Array.map` truyền `(element, index, array)` nên `index` rơi vào tham số `home` của `globToRegExp(pattern, home = homedir())`, và mọi pattern `~` nở thành `1/.aws/...`, `2/.ssh/...`. Phải gọi qua lambda: `paths.map(p => globToRegExp(p))`.
+Lỗi này từng sống qua trọn một chu trình review vì hai lý do cộng lại: test gọi `globToRegExp` trực tiếp với `home` tường minh nên không đi qua đường `.map`, và các ca kiểm dùng `~/.aws/credentials` với `~/.ssh/id_rsa` — hai đường dẫn VẪN bị chặn nhờ pattern basename `**/credentials` và `**/id_rsa` trùng khớp tình cờ. **Test cho rule path phải đi qua `evaluate` và phải dùng tên file mà không pattern basename nào phủ** (ví dụ `config`, `known_hosts`), nếu không test sẽ xanh trên code hỏng.
 
 ### 6.2 Infra — `PreToolUse: Bash`
 
@@ -172,9 +181,18 @@ Không có rule này thì mọi rule khác chỉ là gợi ý: Codex bị chặn
 | ruleId | Chặn khi |
 |---|---|
 | `selfprotect.policy-file` | `apply_patch` hoặc lệnh shell ghi vào `codex-guardrail.json` |
-| `selfprotect.hooks-file` | Ghi vào `~/.codex/hooks.json` hoặc `~/.codex/config.toml` |
-| `selfprotect.install-dir` | Ghi vào thư mục cài guardrail |
-| `selfprotect.escape-inline` | Command string **chứa** `CODEX_GUARDRAIL_ALLOW` — agent không được tự phát escape cho chính nó (§9) |
+| `selfprotect.hooks-file` | Ghi vào `~/.codex/hooks.json` hoặc `~/.codex/config.toml`, **hoặc xoá/di chuyển chính thư mục `~/.codex`** |
+| `selfprotect.install-dir` | Ghi vào thư mục cài guardrail, hoặc xoá chính thư mục đó |
+| `selfprotect.audit-log` | Ghi/xoá/truncate `~/.codex/guardrail-audit.jsonl`. Đọc thì cho qua |
+| `selfprotect.escape-inline` | Command có **dạng gán biến** `CODEX_GUARDRAIL_ALLOW=...` ở đầu segment — agent không được tự phát escape cho chính nó (§9) |
+
+`protectedPaths` là **object** `ruleId -> [glob]`, không phải mảng phẳng. Lý do: ruleId chính là khoá của escape (`CODEX_GUARDRAIL_ALLOW=<ruleId>`), nên gộp mọi đường dẫn vào một ruleId khiến escape rộng hơn ý định — người chỉ cần sửa `codex-guardrail.json` của dự án (đã có CODEOWNERS làm tầng hai) lại được cấp luôn quyền sửa `~/.codex/hooks.json`, tức quyền tháo hook, thứ không có tầng nào chắn. Shape object cũng giữ được §12: thêm nhóm bảo vệ mới làm được bằng sửa JSON, không sửa `.mjs`.
+
+**`escape-inline` phải neo vào dạng gán biến, KHÔNG được dùng substring.** Đo được: `includes('CODEX_GUARDRAIL_ALLOW')` chặn oan `grep -rn CODEX_GUARDRAIL_ALLOW README.md` và `git commit -m "docs: giải thích CODEX_GUARDRAIL_ALLOW"` — tức guardrail chặn chính việc viết tài liệu cho guardrail, mà §9 lại BẮT BUỘC README nhắc tên biến này. Lưu ý khi cài đặt: `parseCommand` strip tiền tố gán biến khỏi `argv`, nên phải soi `raw` của segment.
+
+**Phân biệt đọc và ghi theo NGHĨA TỪNG BINARY, không theo sự có mặt của token.** Đọc policy của chính mình là việc bình thường và hữu ích; chỉ ghi mới chặn. Cụ thể: `sed` chỉ là ghi khi có `-i`/`--in-place`; `cp`/`install` chỉ khi đường dẫn được bảo vệ là tham số **cuối**; `dd` chỉ khi `of=`; `mv` chặn cả hai chiều (đích bị ghi, nguồn thì mất policy khỏi vị trí cũ); `rm`/`tee`/`truncate`/`patch`/`ln` thì mọi vị trí. Soi mọi token trong argv sẽ chặn oan `sed -n '1,5p' codex-guardrail.json` và `cp codex-guardrail.json /tmp/backup.json` — hai việc nên khuyến khích.
+
+**Kiểm thư mục tổ tiên** cần cho `rm -rf ~/.codex` (bảo vệ `~/.codex/hooks.json` không tự bảo vệ thư mục chứa nó). Điều kiện sống còn khi cài đặt: **bỏ qua pattern có tiền tố literal rỗng** như `**/codex-guardrail.json`, nếu không mọi đường dẫn đều là "tổ tiên" của chuỗi rỗng và `rm -rf` lên bất cứ gì cũng bị chặn. Và chỉ áp cho tham số thật sự xoá thư mục — `rm` positionals, `mv` **nguồn** — vì `cp x ~/.codex` và `mv x ~/.codex` là ghi VÀO thư mục, không phá nó.
 
 ### 6.6 Chất lượng — `PreToolUse: apply_patch`
 
@@ -369,6 +387,10 @@ Thiếu bước 2 thì tầng thứ ba (§7) không tồn tại: dev nới polic
 9. **`ssh` lồng hai tầng lọt.** `ssh h1 "ssh h2 psql"` không bị soi, vì lần gọi lồng đã tắt `inspectRemoteCommand` để chống đệ quy vô hạn.
 10. **Escape có thể được cài bền vững qua file rc của shell.** `export` bên trong một tool call KHÔNG lan tới tiến trình Codex nên không dùng được để tự phát escape — đó là chủ ý. Nhưng agent ghi `export CODEX_GUARDRAIL_ALLOW=<ruleId>` vào `~/.zshrc` / `~/.bashrc` / `~/.profile` thì **phiên Codex sau sẽ thừa hưởng**, và các file đó không nằm trong `selfProtect.protectedPaths`. Thêm chúng vào sẽ chặn oan việc sửa dotfile — việc dev làm bình thường. Đây là lý do §7 tồn tại: rule không hiện trong diff chỉ có một tầng bảo vệ.
 11. **Một số lệnh git phá huỷ được cố ý cho qua.** `git branch -D` (reflog cứu được ~90 ngày, và đây là lệnh dọn branch đã merge dùng hằng ngày — chặn là ma sát thật), và `git update-ref -d` cùng họ plumbing (`symbolic-ref`, ...) vì chặn chúng mở ra một họ lệnh không có điểm dừng rõ. Cân rồi loại có chủ đích, không phải bỏ sót.
+12. **Không có bước nở biến môi trường ở bất kỳ rule nào.** Đo được: `rm -rf "$HOME/.codex"` và `rm -rf ${HOME}/.codex` LỌT trong khi `rm -rf ~/.codex` bị chặn. Đây là khoảng trống CHUNG của cách tiếp cận token, không riêng rule nào — mọi rule khớp theo đường dẫn đều chịu. Nở biến đúng cách đòi phải biết giá trị biến lúc chạy, thứ hook không có.
+13. **Glob nằm trong chính token thì lọt.** `rm -rf ~/.codex*` và `rm -rf ~/.code*` LỌT vì rule so đường dẫn theo văn bản, không coi token là một glob có thể khớp đường dẫn được bảo vệ. Đây là đường lách rẻ nhất còn lại của `self-protect`. Sửa đúng cần một cơ chế mới: coi token là glob rồi kiểm xem nó CÓ THỂ khớp đường dẫn được bảo vệ hay không.
+14. **`normalizePath` không giải `.` và `..`, nên pattern KHÔNG phải cây `**` bị lách bằng cách chèn đoạn đường dẫn.** Đo được: `cat ~/.docker/./config.json` và `cat ~/.docker/buildx/../config.json` LỌT, trong khi `cat ~/.docker/config.json` bị chặn. Phạm vi hẹp hơn tưởng: mọi cây `**` đều miễn nhiễm vì `**` khớp xuyên qua `./` (đo: `~/.aws/./config`, `~/.config/gcloud/./access_tokens.db`, `~/.ssh/./my_custom_key` đều bị chặn đúng), nên sau khi đổi `~/.kube/config` thành `~/.kube/**` thì chỗ hở duy nhất còn lại là `~/.docker/config.json*` — không nới thành `~/.docker/**` được vì `~/.docker` còn chứa `buildx/`, `contexts/`, `daemon.json` vô hại. Sửa gốc là cho `normalizePath` chuẩn hoá `.`/`..`; việc đó siết cùng lúc mọi rule khớp đường dẫn nên thuộc bản sau. Lưu ý dạng lách này là hành vi CỐ TÌNH, đã nằm dưới giới hạn #1.
+15. **Escape có thể được cấp sai chỗ khi hai rule cùng chặn một lệnh.** `rm -rf ~` trúng cả `infra.deny-pattern` lẫn `selfprotect.hooks-file`. ruleId được báo — và do đó khoá escape mà dev nhận được — phụ thuộc THỨ TỰ RULE trong dispatcher (§5). Dev escape theo message sẽ nới đúng một rule, rule còn lại vẫn chặn; đó là hành vi đúng nhưng dễ gây bối rối, nên `doctor` và README cần nói rõ escape là theo từng ruleId.
 
 ## 16. Ẩn số cần spike trước khi code
 
