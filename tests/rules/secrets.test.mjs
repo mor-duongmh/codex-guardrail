@@ -212,11 +212,20 @@ test('cho qua command substitution hợp lệ', () => {
 //      nhờ `**/credentials` và `**/id_rsa` trùng khớp tình cờ — chính sự trùng
 //      khớp đó đã CHE lỗi. Nên ở đây dùng `config`, `known_hosts`,
 //      `access_tokens.db`: chúng chỉ có thể bị chặn nhờ pattern `~`.
+//
+//   LƯU Ý (round sau): điểm neo của `~/.ssh/**` đã đổi từ `known_hosts` sang
+//   `my_custom_key`. Lý do: `known_hosts` giờ nằm trong secrets.allowPaths (nó
+//   là dữ liệu công khai theo thiết kế, và `ssh-keyscan >> known_hosts` là lệnh
+//   thiết lập thường ngày — chặn nó là chặn oan). `my_custom_key` thoả đúng
+//   tiêu chí (2) ở trên: không khớp `**/id_rsa`, `**/id_ed25519`,
+//   `**/credentials`, `**/*.key`, `**/*.pem` hay bất kỳ pattern basename nào,
+//   và không có đuôi `.pub` nên `~/.ssh/*.pub` cũng không nới cho nó. Chứng
+//   nhân cho `~/.ssh/**` vẫn còn hiệu lực.
 const HOME_ONLY = [
   ['~/.aws/**', '~/.aws/config'],
   ['~/.config/gcloud/**', '~/.config/gcloud/access_tokens.db'],
   ['~/.kube/config', '~/.kube/config'],
-  ['~/.ssh/**', '~/.ssh/known_hosts'],
+  ['~/.ssh/**', '~/.ssh/my_custom_key'],
   ['~/.docker/config.json', '~/.docker/config.json'],
 ];
 
@@ -258,4 +267,103 @@ test('chống chặn oan: thư mục cùng tiền tố và file thường dướ
     const r = evaluate(shell(cmd), P);
     assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId ?? ''}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Round 2: sửa `.map(globToRegExp)` làm `~/.ssh/**` cưỡng chế THẬT lần đầu, và
+// kéo theo chặn oan bốn thứ KHÔNG phải secret: `known_hosts` (fingerprint host,
+// dữ liệu công khai theo thiết kế), `config` (alias host, không phải credential
+// — lo "đừng chạm host prod" do `infra.ssh.denyHosts` xử lý riêng), và khoá
+// CÔNG KHAI `*.pub`. Chặn oan là chế độ hỏng tệ nhất: dev sẽ tắt guardrail, và
+// guardrail bị tắt bảo vệ 0 thứ.
+//
+// `~/.ssh/**` GIỮ NGUYÊN trong denyPaths: nó là catch-all duy nhất cho khoá
+// riêng đặt tên tuỳ ý (`id_ecdsa`, `id_dsa`, tên tự chọn) mà không pattern
+// basename nào phủ được. Ba entry allowPaths chỉ khoét đúng ba lỗ đó.
+
+test('cho qua thứ KHÔNG phải secret trong ~/.ssh', () => {
+  for (const cmd of [
+    'cat ~/.ssh/known_hosts',
+    'cat ~/.ssh/config',
+    'cat ~/.ssh/id_rsa.pub',
+    'cat ~/.ssh/id_ed25519.pub',
+    // Thiết lập dev/CI thường ngày: đích redirect NẰM trong argv nên vẫn bị soi.
+    'ssh-keyscan gh.com >> ~/.ssh/known_hosts',
+  ]) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId ?? ''}`);
+  }
+});
+
+test('cho qua dạng tuyệt đối $HOME, không chỉ dạng ~', () => {
+  // Pattern trong allowPaths cũng đi qua normalizePath nên `~` nở ra homedir
+  // thật; nếu chỉ dạng `~` được cho qua thì dev viết đường dẫn tuyệt đối sẽ
+  // vẫn bị chặn oan.
+  for (const p of ['/.ssh/known_hosts', '/.ssh/config', '/.ssh/id_rsa.pub']) {
+    const abs = homedir() + p;
+    const r = evaluate(shell(`cat ${abs}`), P);
+    assert.equal(r.decision, 'allow', `chặn oan: cat ${abs} => ${r.ruleId ?? ''}`);
+  }
+});
+
+test('vẫn chặn khoá riêng trong ~/.ssh, kể cả tên tuỳ ý', () => {
+  // Phần quan trọng nhất: chứng minh ba entry allowPaths KHÔNG nới quá.
+  // `id_ecdsa`, `id_dsa`, `my_custom_key`, `deploy_key` không khớp bất kỳ
+  // pattern basename nào trong denyPaths — chỉ `~/.ssh/**` chặn được chúng.
+  for (const cmd of [
+    'cat ~/.ssh/id_rsa',
+    'cat ~/.ssh/id_ed25519',
+    'cat ~/.ssh/id_ecdsa',
+    'cat ~/.ssh/id_dsa',
+    'cat ~/.ssh/my_custom_key',
+    'cat ~/.ssh/deploy_key',
+  ]) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'deny', `lọt: ${cmd}`);
+    assert.equal(r.ruleId, 'secrets.read-path', cmd);
+  }
+});
+
+test('ba entry allowPaths không nới sang store secret khác', () => {
+  for (const cmd of ['cat ~/.aws/credentials', 'cat ~/.kube/config',
+                     'cat ~/.docker/config.json']) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'deny', `lọt: ${cmd}`);
+    assert.equal(r.ruleId, 'secrets.read-path', cmd);
+  }
+});
+
+// Khoá lại phán quyết: pattern `.pub` phải là `~/.ssh/*.pub`, KHÔNG phải
+// `**/*.pub`. Đã đo trên corpus 336 đường dẫn `.pub`: `**/*.pub` mở 160 ca,
+// `~/.ssh/*.pub` mở 48 ca, và 112 ca chênh lệch KHÔNG mang lại lợi ích nào —
+// file `.pub` trong repo (`certs/`, `src/`, cwd) vốn ĐÃ được cho qua ở baseline
+// vì không denyPath nào khớp đuôi `.pub` ngoài các thư mục secret dưới home.
+// 112 ca đó chỉ gồm: mở toàn bộ cây `~/.aws/**` + `~/.config/gcloud/**` qua
+// hậu tố `.pub`, cộng lỗ hổng toàn cục cho họ `**/.env.*`. Đây là policy AN
+// NINH: carve-out rộng hơn mức cần thiết là nợ kỹ thuật sẽ bị copy sang chỗ
+// khác. Test này làm nó đỏ nếu ai đó nới lại thành `**/*.pub`.
+//
+// KHÔNG dùng `~/.docker/config.json.pub` hay `~/.kube/config.pub` làm chứng
+// nhân ở đây: đã đo, hai ca đó `allow` CẢ TRƯỚC lẫn SAU khi thêm entry `.pub`.
+// Lý do là `~/.docker/config.json` và `~/.kube/config` là pattern ĐÚNG-Y
+// (không có `**`), nên mọi biến thể thêm hậu tố vốn đã không bị chặn — đây là
+// khoảng trống có sẵn của denyPaths, không phải hệ quả của `.pub`. Đưa chúng
+// vào đây sẽ tạo chứng nhân GIẢ, đỏ ngay lập tức mà không nói lên điều gì.
+test('`~/.ssh/*.pub` không được nới thành `**/*.pub`', () => {
+  for (const cmd of [
+    'cat ~/.aws/credentials.pub',
+    'cat ~/.config/gcloud/creds.pub',
+    'cat .env.pub',
+    'cat .env.production.pub',
+  ]) {
+    const r = evaluate(shell(cmd), P);
+    assert.equal(r.decision, 'deny', `\`**/*.pub\` đã lọt vào allowPaths: ${cmd}`);
+  }
+});
+
+test('`~/.ssh/*.pub` chỉ phủ một tầng, không đệ quy', () => {
+  // `*` không vượt `/`: khoá công khai thật nằm phẳng trong `~/.ssh`, nên
+  // không cần phủ thư mục con — và không nên, để bán kính nhỏ nhất.
+  const r = evaluate(shell('cat ~/.ssh/backup/id_rsa.pub'), P);
+  assert.equal(r.decision, 'deny', 'cat ~/.ssh/backup/id_rsa.pub');
 });

@@ -7,7 +7,10 @@
       "~/.aws/**", "~/.config/gcloud/**", "~/.kube/config", "~/.ssh/**",
       "~/.docker/config.json"
     ],
-    "allowPaths": ["**/.env.example", "**/.env.sample", "**/.env.template"]
+    "allowPaths": [
+      "**/.env.example", "**/.env.sample", "**/.env.template",
+      "~/.ssh/known_hosts", "~/.ssh/config", "~/.ssh/*.pub"
+    ]
   },
   "infra": {
     "denyBinaries": [
