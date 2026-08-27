@@ -369,3 +369,36 @@ test('F1: binary trùng tiền tố if/while/until không bị chặn oan', () =
     assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId} ${r.reason ?? ''}`);
   }
 });
+
+// `sudo -u postgres psql` là cách gọi CHUẨN của psql, không phải dạng lách khó
+// gặp. Cờ mang giá trị làm `effectiveArgv` dừng ở chính giá trị đó (`postgres`),
+// nên bin thành "postgres" và TOÀN BỘ denyBinaries không được cưỡng chế. Trước
+// khi sửa: `sudo -u postgres psql -c "drop table t"` LỌT hoàn toàn.
+// argv.mjs từng ghi đây là giới hạn chấp nhận được với lý do "không đoán bừa cờ
+// nào ăn giá trị" — lý do đó không đứng được: với một tập wrapper đã biết thì
+// tập cờ mang giá trị cũng đã biết và ổn định, không phải phỏng đoán.
+test('cờ mang giá trị của wrapper không làm mất cưỡng chế', () => {
+  const cases = [
+    'sudo -u postgres psql -c "select 1"',
+    'sudo -u root psql -l',
+    'sudo --user=postgres psql -l',
+    'sudo -g admin psql -l',
+    'doas -u root terraform apply',
+    'sudo -u deploy aws s3 rm s3://b --recursive',
+    'nice -n 10 psql -l',
+    'npx -p @foo/bar wrangler deploy',
+  ];
+  for (const cmd of cases) {
+    assert.equal(evaluate(shell(cmd), P).decision, 'deny', `ca: ${cmd}`);
+  }
+});
+
+// Chiều ngược lại: bóc cờ KHÔNG được ăn mất lệnh thật. `time -p psql` có `-p`
+// KHÔNG mang giá trị (POSIX portable output), nên nếu dùng một tập cờ gộp chung
+// cho mọi wrapper thì `psql` bị coi là giá trị của `-p` và LỌT. Đây là lý do
+// tập cờ phải theo TỪNG wrapper.
+test('cờ không mang giá trị không ăn mất lệnh thật', () => {
+  for (const cmd of ['time -p psql -l', 'sudo -n psql -l', 'sudo -i psql -l']) {
+    assert.equal(evaluate(shell(cmd), P).decision, 'deny', `ca: ${cmd}`);
+  }
+});
