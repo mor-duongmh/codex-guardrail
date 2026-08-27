@@ -3,10 +3,11 @@
 import { fileURLToPath } from 'node:url';
 import { runHook } from '../lib/dispatch.mjs';
 
-const USAGE = 'Cách dùng: guardrail <hook|install|uninstall|doctor|stats>\n'
+const USAGE = 'Cách dùng: guardrail <hook|install|uninstall|init|doctor|stats>\n'
   + '  hook       đọc payload Codex từ stdin và quyết định chặn hay cho qua\n'
   + '  install    wire hook vào ~/.codex/hooks.json (merge, có backup)\n'
   + '  uninstall  gỡ đúng entry của guardrail\n'
+  + '  init       sinh codex-guardrail.json bằng cách suy ra từ repo\n'
   + '  doctor     kiểm tra wiring và in rule đang hiệu lực\n'
   + '  stats      tổng hợp audit log theo rule\n';
 
@@ -51,6 +52,26 @@ if (sub === 'hook') {
   // exitCode không có ngưỡng nào để vượt, và giữ một nếp cho cả file thì không ai
   // phải nhớ "nhánh nào thì được dùng exit()".
   process.exitCode = res.ok ? 0 : 1;
+} else if (sub === 'init') {
+  // import() ĐỘNG, không import top-level: hook chạy trên mọi tool call và
+  // tests/latency.test.mjs ghim ngân sách đó, nên module chỉ subcommand này cần
+  // không được nạp trên đường hook.
+  const { initProject } = await import('../lib/init.mjs');
+  const { findProjectRoot } = await import('../lib/policy.mjs');
+  // Ghi ở GỐC REPO, không ở cwd: policy áp cho cả dự án, và `guardrail init`
+  // gõ từ một thư mục con mà sinh file ở đó thì file đó không bao giờ được
+  // loadPolicy đọc — findProjectRoot chỉ tìm lên tới `.git`.
+  const root = findProjectRoot(process.cwd());
+  if (!root) {
+    process.stderr.write('✗ Không tìm được thư mục .git từ cwd — '
+      + 'chạy guardrail init trong một repo git.\n');
+    process.exitCode = 1;
+  } else {
+    const res = initProject({ cwd: root });
+    const sink = res.ok ? process.stdout : process.stderr;
+    sink.write(`${res.lines.join('\n')}\n`);
+    process.exitCode = res.ok ? 0 : 1;
+  }
 } else if (sub === 'doctor') {
   const { diagnose } = await import('../lib/doctor.mjs');
   const res = diagnose(process.cwd());
