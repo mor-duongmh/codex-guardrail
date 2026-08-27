@@ -208,11 +208,39 @@ test(`p95 một lần gọi hook dưới ${BUDGET_MS}ms, và phần dôi so vớ
   t.diagnostic(report.split('\n')[0]);
   t.diagnostic(report.split('\n')[1].trim());
 
-  assert.ok(a < BUDGET_MS,
-    `allow ${report}\n  allow p95 vượt ngân sách ${BUDGET_MS}ms. Hook chạy trên MỌI tool call `
-    + 'nên đây là lỗi thật, không phải test khó tính.');
-  assert.ok(d < BUDGET_MS,
-    `deny ${report}\n  deny p95 vượt ngân sách ${BUDGET_MS}ms.`);
+  // Ngân sách TUYỆT ĐỐI chỉ đo được khi máy đủ rảnh. Comment ở `report` trên đã
+  // nhận ra điều này ("baseline cao thì hai cột p95 phình theo mà phần dôi vẫn
+  // nhỏ — đó là nhiễu") nhưng hai assert bên dưới vẫn vô điều kiện, nên test ĐỎ
+  // OAN dưới tải. Đã tái hiện: chạy full suite với 4 tiến trình đốt CPU thì nó
+  // đỏ ở lần 3/3; chạy riêng lúc máy rảnh thì 6/6 xanh. Runner CI dùng chung
+  // luôn có tải, tức đây là test sẽ đỏ oan trên chính CI mà nó bảo vệ — và CI đỏ
+  // oan là đường ngắn nhất tới việc người ta tắt CI.
+  //
+  // Cổng: nếu p95 của `node noop.mjs` TRẦN đã chiếm một phần đáng kể ngân sách
+  // thì sàn đã bị môi trường chi phối và con số tuyệt đối không còn nghĩa. Phần
+  // dôi vẫn assert VÔ ĐIỀU KIỆN bên dưới, vì baseline được đo XEN KẼ trong cùng
+  // vòng lặp nên nó hấp thụ tải — đó mới là phép đo bất biến với môi trường.
+  // KHÔNG suy ngưỡng này từ BUDGET_MS. Bản đầu của chính bản vá này dùng
+  // `BUDGET_MS / 3`, và hậu quả đo được: hạ ngân sách xuống 5ms để thử thì
+  // ngưỡng rảnh thành 1.67ms, baseline 17ms vượt nó, nên assert bị BỎ QUA và
+  // test XANH — đúng cái bẫy no-op mà khối này sinh ra để chống. Ngưỡng phải là
+  // hằng số ĐỘC LẬP, mô tả "một lần khởi động Node trần trên máy rảnh tốn bao
+  // nhiêu" (đo trên máy này: 15-17ms), không liên quan tới ngân sách của hook.
+  const QUIET_MAX_BASE_MS = Number(process.env.GUARDRAIL_LATENCY_QUIET_BASE_MS ?? 45);
+  if (b < QUIET_MAX_BASE_MS) {
+    assert.ok(a < BUDGET_MS,
+      `allow ${report}\n  allow p95 vượt ngân sách ${BUDGET_MS}ms. Hook chạy trên MỌI tool call `
+      + 'nên đây là lỗi thật, không phải test khó tính.');
+    assert.ok(d < BUDGET_MS,
+      `deny ${report}\n  deny p95 vượt ngân sách ${BUDGET_MS}ms.`);
+  } else {
+    // NÓI RA, không bỏ qua im lặng. File này đã từng có một assert thành no-op
+    // âm thầm (xem khối comment đầu file), nên một nhánh bỏ kiểm mà không kêu
+    // lên là đúng cái bẫy đó lặp lại.
+    t.diagnostic(`BỎ QUA ngân sách tuyệt đối ${BUDGET_MS}ms: node cold start p95 `
+      + `${b.toFixed(1)}ms đã vượt ${QUIET_MAX_BASE_MS.toFixed(1)}ms nên máy đang tải `
+      + 'và số tuyệt đối là nhiễu. Phần dôi vẫn được kiểm bên dưới.');
+  }
 
   assert.ok(a - b < ALLOW_OVERHEAD_MS,
     `${report}\n  Phần dôi của đường ALLOW vượt ${ALLOW_OVERHEAD_MS}ms. Baseline đo cùng lúc `
