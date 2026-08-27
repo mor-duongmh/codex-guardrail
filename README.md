@@ -163,6 +163,29 @@ hớ hênh**; nó không phải hàng rào an ninh.
 12. **Không có telemetry.** Dev tháo hook thì không ai biết — lý do tầng CI và
     CODEOWNERS tồn tại.
 
+13. **Thư mục hệ thống KHÔNG được bảo vệ.** Đo được: `rm -rf /usr`, `rm -rf /etc`,
+    `rm -rf /System`, `rm -rf /var/lib` đều LỌT. Mẫu mặc định chỉ phủ `/` và `/*`.
+    Đừng đọc mục "Rule mặc định" ở trên như thể nó phủ mọi lệnh xoá nguy hiểm.
+    Chưa vá ngay vì bản vá thô còn tệ hơn lỗ: `rm -rf /tmp/build-cache` và
+    `rm -rf /var/folders/...` là việc script build làm hằng ngày, nên một mẫu
+    `/var/**` sẽ chặn oan hàng loạt. Danh sách `protectedRoots` tường minh
+    thuộc bản sau.
+14. **Liệt kê thư mục secret vẫn được.** `ls -la ~/.ssh` và `ls ~/.aws` LỌT.
+    Cố ý: liệt kê cho biết CÓ khoá nào tồn tại chứ không cho biết NỘI DUNG
+    khoá, và `cat ~/.ssh/id_rsa` vẫn bị chặn. Chặn `ls` là chặn oan.
+15. **`jq` và `yq` bị chặn oan.** `jq '.env' package.json` bị chặn vì `.env`
+    trông y như một đường dẫn — trong khi nó là filter của jq. Gặp thì escape
+    theo `secrets.read-path`. Sửa đúng cần rule biết ngữ nghĩa tham số của
+    từng binary, thuộc bản sau.
+16. **Một số lệnh git phá huỷ được cố ý cho qua.** `git branch -D` (reflog cứu
+    được khoảng 90 ngày, và đây là lệnh dọn branch dùng hằng ngày) và
+    `git update-ref -d` (plumbing, chặn nó mở ra cả họ plumbing không có điểm
+    dừng rõ). Cân rồi loại, không phải bỏ sót.
+17. **Chèn `./` hoặc `../` vào giữa đường dẫn thì lách được các mẫu chính xác.**
+    `cat ~/.docker/./config.json` LỌT còn `cat ~/.docker/config.json` bị chặn,
+    vì bước chuẩn hoá đường dẫn chưa giải `.` và `..`. Các mẫu dạng cây (`**`)
+    không bị ảnh hưởng.
+
 ## Phát triển
 
 ```
