@@ -1,0 +1,10 @@
+{
+  "git": {
+    "protectedBranches": ["main"]
+  },
+  "convention": {
+    "lintCommand": "node --check {file}",
+    "lintExtensions": [".mjs"],
+    "conventionDocs": ["README.md"]
+  }
+}

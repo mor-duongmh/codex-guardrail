@@ -1,0 +1,70 @@
+name: test
+
+# Vì sao có ma trận 3 OS: engine này khớp ĐƯỜNG DẪN, và đường dẫn là chỗ khác
+# nhau nhiều nhất giữa các nền tảng. Đã có tiền lệ trong repo này: normalizePath
+# từng có lỗi chỉ hiện trên Windows, và Task 2 phải thêm tham số `home` để test
+# được nó từ darwin. Chạy một OS là chạy đúng cái OS của người viết code.
+#
+# Vì sao 3 phiên bản Node: 20 là SÀN mà package.json hứa (engines >= 20) — hứa
+# thì phải kiểm; 24 là LTS hiện hành, tức phiên bản dev thật đang chạy; 22 là
+# bậc giữa. Cả ba đã chạy xanh trên darwin trước khi commit (355/355 mỗi bản).
+#
+# KHÔNG có bước nào bỏ qua cơ chế tin cậy hook của Codex, vì không cần: CI không
+# chạy Codex. `guardrail doctor` cố tình thoát 1 khi hook chưa được cấp tin cậy,
+# nên nó không phải bước CI được — trạng thái đó chỉ có nghĩa trên máy có Codex
+# thật. Việc `install` làm gì với hooks.json đã được tests/install.test.mjs phủ,
+# trong CODEX_HOME sandbox.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      # fail-fast: false vì mục đích của ma trận là BIẾT ô nào đỏ. Dừng sớm thì
+      # một lỗi Windows sẽ che mất một lỗi Node 20 khác.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [20, 22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          # Không có `cache: npm`: repo không có dependency runtime và không có
+          # package-lock.json, nên không có gì để cache và bật lên sẽ đỏ.
+
+      # Chạy ĐÚNG lệnh mà dev chạy, không phải một biến thể riêng cho CI. Nếu CI
+      # gọi `node --test <đường dẫn>` trực tiếp thì `npm test` có thể hỏng mà CI
+      # vẫn xanh — đã xảy ra thật: `node --test tests/` (dạng thư mục) chạy được
+      # trên Node 20 nhưng NÉM MODULE_NOT_FOUND trên Node 22 và 24, nên script
+      # `test` phải là `node --test` không tham số. Đó là lỗi mà chính ma trận
+      # này bắt được, và chỉ bắt được vì CI gọi qua npm.
+      - run: npm test
+        env:
+          # Ngân sách tuyệt đối nới trên CI vì runner chậm hơn máy dev nhiều, và
+          # trên Windows tạo process đắt hơn Unix nhiều — đường deny của hook trả
+          # tiền cho HAI lần tạo process (node, rồi `git` để lấy branch cho audit).
+          # KHÔNG xoá test độ trễ, chỉ nới ngưỡng.
+          GUARDRAIL_LATENCY_BUDGET_MS: ${{ matrix.os == 'windows-latest' && 500 || 250 }}
+          # Ngưỡng PHẦN DÔI thì Linux/macOS dùng nguyên mặc định của test: phần
+          # dôi được so với baseline đo cùng lúc trên cùng máy, nên nó đã tự bù
+          # cho runner chậm — không có lý do nới. Chỉ Windows được nới 2x, vì ở
+          # đó tạo process đắt hơn Unix nhiều và đường deny trả tiền cho hai lần
+          # tạo process, mà chưa ai đo con số thật trên runner Windows.
+          # Test tự in dòng `p95: ...` mỗi lần chạy, kể cả khi xanh — đọc số ở
+          # lần chạy xanh đầu tiên của ô Windows rồi bỏ hai dòng dưới đi.
+          GUARDRAIL_LATENCY_ALLOW_OVERHEAD_MS: ${{ matrix.os == 'windows-latest' && 120 || 60 }}
+          GUARDRAIL_LATENCY_DENY_OVERHEAD_MS: ${{ matrix.os == 'windows-latest' && 300 || 150 }}

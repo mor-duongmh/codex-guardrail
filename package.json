@@ -1,0 +1,12 @@
+{
+  "name": "codex-guardrail",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": { "guardrail": "./bin/guardrail.mjs" },
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test",
+    "test:latency": "node --test tests/latency.test.mjs"
+  },
+  "files": ["bin", "lib", "policy"]
+}

@@ -100,7 +100,7 @@ Nếu spike §16.2 cho thấy Codex có tool đọc file riêng ngoài `shell`, 
 
 Mọi `ruleId` dưới đây là danh định ổn định — dùng trong escape, audit log, và message chặn.
 
-### 6.1 Secrets — `PreToolUse: shell`, `PreToolUse: apply_patch`
+### 6.1 Secrets — `PreToolUse: Bash`, `PreToolUse: apply_patch`
 
 | ruleId | Chặn khi |
 |---|---|
@@ -113,14 +113,23 @@ Nguyên tắc `secrets.read-path`: khớp theo **đường dẫn**, không theo 
 
 `denyPaths` mặc định: `**/.env`, `**/.env.*`, `**/*.pem`, `**/*.key`, `**/*.p12`, `**/*.pfx`, `**/*.jks`, `**/id_rsa`, `**/id_ed25519`, `**/credentials`, `**/service-account*.json`, `**/.npmrc`, `**/.netrc`, `**/.git-credentials`, `~/.aws/**`, `~/.config/gcloud/**`, `~/.kube/config`, `~/.ssh/**`, `~/.docker/config.json`.
 
-`allowPaths` mặc định (thắng deny): `**/.env.example`, `**/.env.sample`, `**/.env.template`.
+`allowPaths` mặc định (thắng deny): `**/.env.example`, `**/.env.sample`, `**/.env.template`, `~/.ssh/known_hosts`, `~/.ssh/config`, `**/*.pub`.
 
-### 6.2 Infra — `PreToolUse: shell`
+Ba mục `~/.ssh` cuối là **cần thiết, không phải nới lỏng tuỳ tiện**: `~/.ssh/**` phải ở lại trong `denyPaths` vì nó là catch-all duy nhất cho khoá riêng đặt tên tuỳ ý (`id_ecdsa`, `deploy_key`, tên tự chọn) mà không pattern basename nào phủ. Nhưng nó kéo theo chặn oan `cat ~/.ssh/id_rsa.pub` (khoá **công khai**), `cat ~/.ssh/known_hosts` (fingerprint host, công khai theo thiết kế), `cat ~/.ssh/config` (alias host, không phải credential), và `ssh-keyscan gh.com >> ~/.ssh/known_hosts` (thiết lập dev/CI thường ngày). Mối lo "đừng chạm host prod" do `infra.ssh.denyHosts` xử lý riêng (§6.2), không phải việc của rule này.
+
+**Quy tắc thường trực: KHÔNG dùng `**` trong `secrets.allowPaths`.** allowPaths thắng denyPaths, và `normalizePath` KHÔNG giải `.`/`..` (đo được: `~/.aws/./config` giữ nguyên `./`) trong khi `matchesAny` so chuỗi thô. Một entry allow hình `**` nằm trong cây deny vì vậy mở ra đường đi xuyên: đo được `~/.kube/cache/**` trong allowPaths làm `cat ~/.kube/cache/../config` lật từ deny thành **allow**. Các carve-out `~/.ssh` hiện có an toàn đúng vì chúng một cấp (`*.pub`) hoặc chính xác, không phải `**`.
+
+`denyPaths` nên dùng cây `**` chứ đừng dùng pattern chính xác cho thư mục chứa credential. Lý do đo được: `~/.kube/config` dạng chính xác để lọt `~/.kube/config.bak`, `config.old`, `kubeconfig-staging`, `configs/prod.yaml` — bản sao lưu kubeconfig chứa đúng cert và token như bản gốc, và `cp ~/.kube/config ~/.kube/config.bak` là việc người ta làm trước khi đổi context. Cây `**` cũng khép luôn dạng `./` (đo: `~/.aws/./config` bị chặn nhờ `~/.aws/**`), thứ mà pattern chính xác không làm được.
+
+**Bẫy cài đặt đã gây ra một lỗ an ninh thật, ghi lại để không tái diễn:** compile glob bằng `paths.map(globToRegExp)` là SAI — `Array.map` truyền `(element, index, array)` nên `index` rơi vào tham số `home` của `globToRegExp(pattern, home = homedir())`, và mọi pattern `~` nở thành `1/.aws/...`, `2/.ssh/...`. Phải gọi qua lambda: `paths.map(p => globToRegExp(p))`.
+Lỗi này từng sống qua trọn một chu trình review vì hai lý do cộng lại: test gọi `globToRegExp` trực tiếp với `home` tường minh nên không đi qua đường `.map`, và các ca kiểm dùng `~/.aws/credentials` với `~/.ssh/id_rsa` — hai đường dẫn VẪN bị chặn nhờ pattern basename `**/credentials` và `**/id_rsa` trùng khớp tình cờ. **Test cho rule path phải đi qua `evaluate` và phải dùng tên file mà không pattern basename nào phủ** (ví dụ `config`, `known_hosts`), nếu không test sẽ xanh trên code hỏng.
+
+### 6.2 Infra — `PreToolUse: Bash`
 
 | ruleId | Chặn khi |
 |---|---|
-| `infra.deny-binary` | Basename của token lệnh nằm trong `infra.denyBinaries` và không nằm trong `infra.allowBinaries` |
-| `infra.deny-pattern` | Command khớp một regex trong `infra.denyPatterns` |
+| `infra.deny-binary` | Basename của **lệnh hữu hiệu** nằm trong `infra.denyBinaries` và không nằm trong `infra.allowBinaries`. "Hữu hiệu" = sau khi bóc dải wrapper mở đầu (`sudo`, `npx`, `bunx`, `pnpm dlx`, …) và keyword shell (`do`, `then`, `(`, `{`, …) — nếu chỉ soi token đầu thì `npx wrangler deploy` và `for f in *; do psql; done` lọt |
+| `infra.deny-pattern` | Regex trong `infra.denyPatterns` khớp **tiền tố lệnh hữu hiệu của từng segment**, không phải substring của command thô. Chạy trên chuỗi thô thì `git commit -m "docker system prune is dangerous"` bị chặn oan. Hệ quả cần biết khi soạn policy: pattern nhắm vào giữa lệnh (ví dụ `drop\s+table` để bắt `psql -c "drop table users"`) sẽ **không bao giờ khớp** |
 | `infra.ssh-deny-host` | Token đích của `ssh`/`scp` khớp `infra.ssh.denyHosts` |
 | `infra.ssh-remote-command` | Phần lệnh sau host của `ssh` vi phạm chính `infra.denyBinaries` / `infra.denyPatterns` |
 
@@ -128,21 +137,31 @@ Nguyên tắc `secrets.read-path`: khớp theo **đường dẫn**, không theo 
 
 Không nằm trong deny mặc định: `sqlite3` (thường là DB local nhúng trong app), `docker` (chỉ chặn lệnh xoá qua `denyPatterns`), `ssh`/`scp` (xử lý riêng bằng `infra.ssh`).
 
-`denyPatterns` mặc định: `docker\s+system\s+prune`, `docker\s+volume\s+rm`, `npm\s+publish`, `rm\s+-rf\s+/` và `rm\s+-rf\s+~`.
+`denyPatterns` mặc định: `docker\s+system\s+prune`, `docker\s+volume\s+rm`, `npm\s+publish`, cộng hai pattern chặn xoá root.
+
+Hai pattern root phải cho phép dải flag ở **cả hai phía** đường dẫn. Lý do đo được: `rm -rf /` trần thì GNU coreutils vốn đã từ chối thi hành, còn dạng thật sự chạy được là `rm -rf --no-preserve-root /` (flag đứng **trước** path) — nếu chỉ neo flag đứng sau thì guardrail chặn dạng vô hại và cho qua dạng gây chết. Các dạng phải chặn: `rm -rf /`, `/*`, `-- /`, `-r -f /`, `--recursive --force /`, `--no-preserve-root /` (trước và sau path), và bản `~` tương ứng. Phải cho qua mọi đường dẫn con: `rm -rf /tmp/build`, `rm -rf <path>/node_modules`, `rm -rf ~/Library/Caches/foo`.
+
+**Giới hạn đã biết của cách dùng regex ở đây:** root nằm ở vị trí tham số thứ hai (`rm -rf ./build /`) vẫn lọt, và `~foo` (home của user khác) chưa được coi ngang `~`. Cách sửa đúng là kiểm ở mức **token** — có token đường dẫn nào bằng đúng `/`, `~` hay `~user` — chứ không thêm nhánh regex. Xem §15.
 
 `infra.ssh` mặc định: `denyHosts: []`, `inspectRemoteCommand: true`. Dự án tự khai host prod vào `denyHosts`.
 
-### 6.3 Git workflow — `PreToolUse: shell`
+### 6.3 Git workflow — `PreToolUse: Bash`
 
-Chỉ chạy khi token lệnh đầu là `git` hoặc `gh`. Branch hiện tại lấy bằng `git rev-parse --abbrev-ref HEAD` — gọi lazy, chỉ khi cần.
+Chỉ chạy khi **lệnh hữu hiệu** của segment là `git` hoặc `gh` — tức sau khi bóc wrapper và keyword shell bằng `lib/argv.mjs`, giống `infra` (§6.2). Soi `argv[0]` trần thì `sudo git push --force` và `for b in a b; do git push --force origin $b; done` lọt sạch.
+
+Subcommand phải tìm bằng cách **bỏ qua global option của git và giá trị của chúng** (`-C`, `-c`, `--git-dir`, `--work-tree`, `--namespace`, `--exec-path`). Lấy "token đầu không bắt đầu bằng `-`" thì `git -C /repo push --force` cho subcommand là `/repo`, và MỌI kiểm dựa trên subcommand bị bỏ.
+
+Branch hiện tại lấy bằng `git rev-parse --abbrev-ref HEAD` — gọi lazy, chỉ khi cần, và chạy trong thư mục của `-C` nếu có (kiểm branch của `cwd` cho một repo khác thì vừa chặn oan vừa cho lọt).
 
 | ruleId | Chặn khi |
 |---|---|
 | `git.protected-branch` | `commit` hoặc `push` khi branch hiện tại khớp `git.protectedBranches` |
-| `git.dangerous-flag` | `push --force`, `push --force-with-lease`, `push --delete`, `reset --hard`, `clean -fdx`, `filter-branch`, `tag -d` |
-| `git.no-verify` | Bất kỳ lệnh git có `--no-verify` |
-| `git.commit-message` | `commit -m` với message không khớp `git.commitMessagePattern` |
-| `git.pr-merge` | `gh pr merge` |
+| `git.dangerous-flag` | `push` kèm `--force` / `--force-with-lease` / `--delete` / `--mirror`, hoặc refspec dạng force (`:<ref>` xoá ref, `+<src>:<dst>` force ref); `reset --hard`; `clean -fdx`; `filter-branch`; `tag -d` |
+| `git.no-verify` | Lệnh git có `--no-verify`, hoặc `commit -n` (chỉ `commit`: `push -n` là `--dry-run`, chặn là chặn oan) |
+| `git.commit-message` | `commit` có message không khớp `git.commitMessagePattern`. Message phải đọc được ở cả `-m`, cờ short gộp (`-am`, `-nm`), `--message=<v>`, `--message <v>` |
+| `git.pr-merge` | `gh pr merge` — khớp theo **vị trí** subcommand, không phải `includes('merge')` (`gh pr list --search merge` là lệnh chỉ đọc, chặn là chặn oan) |
+
+Mọi kiểm cờ phải chấp nhận cả short/long/gộp/`=value` cho cùng một ý nghĩa; git nhận hết các dạng đó. Ví dụ đo được: `clean --force -d`, `tag --delete`, `push --force-with-lease=refs/heads/x` đều lọt nếu chỉ so khớp token chính xác một dạng.
 
 `protectedBranches` mặc định: `main`, `master`, `develop`, `release/*`.
 `commitMessagePattern` mặc định: `^(feat|fix|chore|docs|test|refactor|perf|ci|build|style|revert)(\(.+\))?!?: .+` — trùng conventional commits mà morkit `git` skill đang dùng.
@@ -155,16 +174,25 @@ Chỉ chạy khi token lệnh đầu là `git` hoặc `gh`. Branch hiện tại 
 - **Không auto-fix.** Sửa file sau lưng Codex làm nó mất đồng bộ với thứ nó tưởng đã viết.
 - Không khai `lintCommand` → nửa "bắt" tự tắt; `doctor` báo rõ đang tắt.
 
-### 6.5 Self-protection — `PreToolUse: shell`, `PreToolUse: apply_patch`
+### 6.5 Self-protection — `PreToolUse: Bash`, `PreToolUse: apply_patch`
 
 Không có rule này thì mọi rule khác chỉ là gợi ý: Codex bị chặn có thể tự nới policy hoặc tháo hook.
 
 | ruleId | Chặn khi |
 |---|---|
 | `selfprotect.policy-file` | `apply_patch` hoặc lệnh shell ghi vào `codex-guardrail.json` |
-| `selfprotect.hooks-file` | Ghi vào `~/.codex/hooks.json` hoặc `~/.codex/config.toml` |
-| `selfprotect.install-dir` | Ghi vào thư mục cài guardrail |
-| `selfprotect.escape-inline` | Command string **chứa** `CODEX_GUARDRAIL_ALLOW` — agent không được tự phát escape cho chính nó (§9) |
+| `selfprotect.hooks-file` | Ghi vào `~/.codex/hooks.json` hoặc `~/.codex/config.toml`, **hoặc xoá/di chuyển chính thư mục `~/.codex`** |
+| `selfprotect.install-dir` | Ghi vào thư mục cài guardrail, hoặc xoá chính thư mục đó |
+| `selfprotect.audit-log` | Ghi/xoá/truncate `~/.codex/guardrail-audit.jsonl`. Đọc thì cho qua |
+| `selfprotect.escape-inline` | Command có **dạng gán biến** `CODEX_GUARDRAIL_ALLOW=...` ở đầu segment — agent không được tự phát escape cho chính nó (§9) |
+
+`protectedPaths` là **object** `ruleId -> [glob]`, không phải mảng phẳng. Lý do: ruleId chính là khoá của escape (`CODEX_GUARDRAIL_ALLOW=<ruleId>`), nên gộp mọi đường dẫn vào một ruleId khiến escape rộng hơn ý định — người chỉ cần sửa `codex-guardrail.json` của dự án (đã có CODEOWNERS làm tầng hai) lại được cấp luôn quyền sửa `~/.codex/hooks.json`, tức quyền tháo hook, thứ không có tầng nào chắn. Shape object cũng giữ được §12: thêm nhóm bảo vệ mới làm được bằng sửa JSON, không sửa `.mjs`.
+
+**`escape-inline` phải neo vào dạng gán biến, KHÔNG được dùng substring.** Đo được: `includes('CODEX_GUARDRAIL_ALLOW')` chặn oan `grep -rn CODEX_GUARDRAIL_ALLOW README.md` và `git commit -m "docs: giải thích CODEX_GUARDRAIL_ALLOW"` — tức guardrail chặn chính việc viết tài liệu cho guardrail, mà §9 lại BẮT BUỘC README nhắc tên biến này. Lưu ý khi cài đặt: `parseCommand` strip tiền tố gán biến khỏi `argv`, nên phải soi `raw` của segment.
+
+**Phân biệt đọc và ghi theo NGHĨA TỪNG BINARY, không theo sự có mặt của token.** Đọc policy của chính mình là việc bình thường và hữu ích; chỉ ghi mới chặn. Cụ thể: `sed` chỉ là ghi khi có `-i`/`--in-place`; `cp`/`install` chỉ khi đường dẫn được bảo vệ là tham số **cuối**; `dd` chỉ khi `of=`; `mv` chặn cả hai chiều (đích bị ghi, nguồn thì mất policy khỏi vị trí cũ); `rm`/`tee`/`truncate`/`patch`/`ln` thì mọi vị trí. Soi mọi token trong argv sẽ chặn oan `sed -n '1,5p' codex-guardrail.json` và `cp codex-guardrail.json /tmp/backup.json` — hai việc nên khuyến khích.
+
+**Kiểm thư mục tổ tiên** cần cho `rm -rf ~/.codex` (bảo vệ `~/.codex/hooks.json` không tự bảo vệ thư mục chứa nó). Điều kiện sống còn khi cài đặt: **bỏ qua pattern có tiền tố literal rỗng** như `**/codex-guardrail.json`, nếu không mọi đường dẫn đều là "tổ tiên" của chuỗi rỗng và `rm -rf` lên bất cứ gì cũng bị chặn. Và chỉ áp cho tham số thật sự xoá thư mục — `rm` positionals, `mv` **nguồn** — vì `cp x ~/.codex` và `mv x ~/.codex` là ghi VÀO thư mục, không phá nó.
 
 ### 6.6 Chất lượng — `PreToolUse: apply_patch`
 
@@ -178,7 +206,7 @@ Không có rule này thì mọi rule khác chỉ là gợi ý: Codex bị chặn
 
 Ghi chú: lockfile bị chặn ở `apply_patch` để agent không sửa tay, và `deps.install-new` (§6.8) chặn lệnh sinh lockfile mới. Nghĩa là **thêm phụ thuộc mới là việc của người**, không phải của agent — dev tự chạy lệnh cài, hoặc escape một lần có ghi log.
 
-### 6.7 Mạng — `PreToolUse: shell`
+### 6.7 Mạng — `PreToolUse: Bash`
 
 | ruleId | Chặn khi |
 |---|---|
@@ -187,7 +215,7 @@ Ghi chú: lockfile bị chặn ở `apply_patch` để agent không sửa tay, v
 
 `net.allowHosts` mặc định: `registry.npmjs.org`, `pypi.org`, `files.pythonhosted.org`, `github.com`, `raw.githubusercontent.com`, `api.github.com`, `crates.io`.
 
-### 6.8 Dependency — `PreToolUse: shell`
+### 6.8 Dependency — `PreToolUse: Bash`
 
 `ruleId: deps.install-new` — chặn `npm i <pkg>`, `npm install <pkg>`, `yarn add`, `pnpm add`, `pip install <pkg>`, `cargo add`, `go get`, `gem install`.
 
@@ -195,7 +223,7 @@ Không chặn: `npm ci`, `npm install` không tham số, `pip install -r require
 
 `deps.enabled: false` tắt hẳn rule cho dự án đang trong giai đoạn chủ động thêm nhiều phụ thuộc.
 
-### 6.9 Redact — `PostToolUse: shell`
+### 6.9 Redact — `PostToolUse: Bash`
 
 `ruleId: redact.stdout` — quét stdout tìm `AKIA[0-9A-Z]{16}`, `sk-[A-Za-z0-9]{20,}`, `ghp_`/`gho_`/`github_pat_`, JWT (`eyJ...`), `-----BEGIN * PRIVATE KEY-----`, `xox[baprs]-`. Phát hiện → cảnh báo vào stderr, không chặn (đã chạy rồi).
 
@@ -353,6 +381,23 @@ Thiếu bước 2 thì tầng thứ ba (§7) không tồn tại: dev nới polic
 3. **`ssh` chỉ soi được lệnh remote viết thẳng trong command.** ProxyJump, `-F` custom config, hoặc lệnh remote sinh động thì lọt.
 4. **Rule không hiện trong diff chỉ có một tầng bảo vệ** (§7). Không có telemetry ở v1 nên dev tháo hook là không ai biết.
 5. **Guardrail cưỡng chế thứ dự án đã có.** Repo không có lint thì `convention.lint` không có gì để chạy.
+6. **Interpreter đọc được file mà không nêu tên file theo cách rule thấy.** Đo được: `python -c "print(open('.env').read())"` lọt, và `node -e` / `ruby -e` / `perl -e` cũng vậy. Đây là trần cưỡng chế của cách khớp theo đường dẫn, không phải bug vá được: chặn mọi interpreter kèm `-c`/`-e` sinh false positive khổng lồ. Dev cần biết giới hạn này để không tin guardrail quá mức.
+7. **Chặn xoá root bằng regex chưa phủ hết vị trí tham số.** `rm -rf ./build /` (root là tham số thứ hai) lọt, và `~foo` — home của **user khác** — chưa được coi ngang `~`. Cách sửa đúng là kiểm ở mức token thay vì thêm nhánh regex; xem §6.2.
+8. **Cửa thoát `allowBinaries` thô ở mức binary, không ở mức subcommand.** Hệ quả đo được: `npx wrangler dev`, `npx supabase start`, `npx vercel dev`, `npx supabase gen types --local` đều bị chặn — lệnh local, chỉ đọc, chạy nhiều lần mỗi ngày. Dev cần `supabase gen types` buộc phải mở `allowBinaries: ["supabase"]`, tức mở luôn `supabase db reset --linked`. Đây là đường dẫn thực tế tới "dev tắt guardrail". Cần `allowPatterns` (cửa thoát theo subcommand) ở bản sau; giữ thế trận deny-list ở v1 là quyết định có chủ đích, không phải bỏ sót.
+9. **`ssh` lồng hai tầng lọt.** `ssh h1 "ssh h2 psql"` không bị soi, vì lần gọi lồng đã tắt `inspectRemoteCommand` để chống đệ quy vô hạn.
+10. **Escape có thể được cài bền vững qua file rc của shell.** `export` bên trong một tool call KHÔNG lan tới tiến trình Codex nên không dùng được để tự phát escape — đó là chủ ý. Nhưng agent ghi `export CODEX_GUARDRAIL_ALLOW=<ruleId>` vào `~/.zshrc` / `~/.bashrc` / `~/.profile` thì **phiên Codex sau sẽ thừa hưởng**, và các file đó không nằm trong `selfProtect.protectedPaths`. Thêm chúng vào sẽ chặn oan việc sửa dotfile — việc dev làm bình thường. Đây là lý do §7 tồn tại: rule không hiện trong diff chỉ có một tầng bảo vệ.
+11. **Một số lệnh git phá huỷ được cố ý cho qua.** `git branch -D` (reflog cứu được ~90 ngày, và đây là lệnh dọn branch đã merge dùng hằng ngày — chặn là ma sát thật), và `git update-ref -d` cùng họ plumbing (`symbolic-ref`, ...) vì chặn chúng mở ra một họ lệnh không có điểm dừng rõ. Cân rồi loại có chủ đích, không phải bỏ sót.
+12. **Không có bước nở biến môi trường ở bất kỳ rule nào.** Đo được: `rm -rf "$HOME/.codex"` và `rm -rf ${HOME}/.codex` LỌT trong khi `rm -rf ~/.codex` bị chặn. Đây là khoảng trống CHUNG của cách tiếp cận token, không riêng rule nào — mọi rule khớp theo đường dẫn đều chịu. Nở biến đúng cách đòi phải biết giá trị biến lúc chạy, thứ hook không có.
+13. **Glob nằm trong chính token thì lọt.** `rm -rf ~/.codex*` và `rm -rf ~/.code*` LỌT vì rule so đường dẫn theo văn bản, không coi token là một glob có thể khớp đường dẫn được bảo vệ. Đây là đường lách rẻ nhất còn lại của `self-protect`. Sửa đúng cần một cơ chế mới: coi token là glob rồi kiểm xem nó CÓ THỂ khớp đường dẫn được bảo vệ hay không.
+14. **`normalizePath` không giải `.` và `..`, nên pattern KHÔNG phải cây `**` bị lách bằng cách chèn đoạn đường dẫn.** Đo được: `cat ~/.docker/./config.json` và `cat ~/.docker/buildx/../config.json` LỌT, trong khi `cat ~/.docker/config.json` bị chặn. Phạm vi hẹp hơn tưởng: mọi cây `**` đều miễn nhiễm vì `**` khớp xuyên qua `./` (đo: `~/.aws/./config`, `~/.config/gcloud/./access_tokens.db`, `~/.ssh/./my_custom_key` đều bị chặn đúng), nên sau khi đổi `~/.kube/config` thành `~/.kube/**` thì chỗ hở duy nhất còn lại là `~/.docker/config.json*` — không nới thành `~/.docker/**` được vì `~/.docker` còn chứa `buildx/`, `contexts/`, `daemon.json` vô hại. Sửa gốc là cho `normalizePath` chuẩn hoá `.`/`..`; việc đó siết cùng lúc mọi rule khớp đường dẫn nên thuộc bản sau. Lưu ý dạng lách này là hành vi CỐ TÌNH, đã nằm dưới giới hạn #1.
+15. **Bản ghi trust của Codex gắn với VỊ TRÍ của entry trong `hooks.json`, nên có thể bị vô hiệu hoá âm thầm.** Đo được trên `~/.codex/config.toml` thật: khoá là `[hooks.state."<đường dẫn hooks.json>:<event_snake>:<chỉ số group>:<chỉ số hook>"]` với `trusted_hash = "sha256:<64 hex>"`. Vì hai con số là VỊ TRÍ, một tool khác cài sau mà chèn group vào TRƯỚC guardrail sẽ làm chỉ số của guardrail đổi, khiến bản ghi trust không còn khớp và Codex quay lại bỏ qua hook — **không báo gì cả**. `install` của guardrail nối group vào cuối nên không phá trust của tool khác, nhưng không kiểm soát được thứ tự tool khác chọn. `guardrail doctor` là cơ chế phát hiện duy nhất; chạy nó sau khi cài thêm tool nào có hook.
+16. **`doctor` không kiểm được `trusted_hash`.** Đã thử 78 tiền ảnh sha256 (command, JSON của hook và của group, nối field theo 7 dấu phân cách, cả file `hooks.json`) đối chiếu 25 hash thật: không khớp cái nào. Nên `doctor` chỉ báo CÓ / KHÔNG CÓ bản ghi trust và nói rõ trong output rằng hash không kiểm được. Nó **không bao giờ** in dấu tick "đã tin cậy" — có bản ghi trust vẫn chỉ là `⚠`, vì bản ghi cũ với hash lệch trông y như bản ghi hợp lệ.
+17. **Escape có thể được cấp sai chỗ khi hai rule cùng chặn một lệnh.** `rm -rf ~` trúng cả `infra.deny-pattern` lẫn `selfprotect.hooks-file`. ruleId được báo — và do đó khoá escape mà dev nhận được — phụ thuộc THỨ TỰ RULE trong dispatcher (§5). Dev escape theo message sẽ nới đúng một rule, rule còn lại vẫn chặn; đó là hành vi đúng nhưng dễ gây bối rối, nên `doctor` và README cần nói rõ escape là theo từng ruleId.
+
+18. **Thư mục hệ thống KHÔNG được bảo vệ.** Đo được: `rm -rf /usr`, `rm -rf /etc`, `rm -rf /System`, `rm -rf /var/lib` đều LỌT. `denyPatterns` mặc định chỉ phủ `/` và `/*` — và `rm -rf /` thực ra bị chặn bởi `selfprotect.hooks-file` vì `/` là tổ tiên của `~/.codex/hooks.json`, tức đúng verdict nhưng SAI ruleId. Đây là khoảng trống THIẾT KẾ, không phải bug của rule nào: cần một danh sách `protectedRoots` tường minh. Bản vá thô còn nguy hiểm hơn lỗ — `rm -rf /tmp/build-cache` và `rm -rf /var/folders/...` là việc script build làm hằng ngày, nên pattern `/var/**` hay `/tmp/**` sẽ chặn oan hàng loạt. Hướng đúng: chặn xoá CHÍNH thư mục cấp 1 (`rm -rf /usr`) chứ không chặn xoá con của nó (`rm -rf /usr/local/lib/x`). Thuộc Plan 2.
+19. **Liệt kê thư mục secret vẫn được.** `ls -la ~/.ssh` và `ls ~/.aws` LỌT vì pattern `~/.ssh/**` đòi dấu `/` sau tên thư mục. Cố ý cân rồi loại: liệt kê tiết lộ CÓ khoá nào tồn tại (do thám) chứ không tiết lộ NỘI DUNG khoá, và `cat ~/.ssh/id_rsa` vẫn chặn đúng. Thêm `~/.ssh` vào denyPaths sẽ chặn cả `ls` vô hại.
+20. **`jq` và `yq` bị chặn oan vì tham số đầu là filter, không phải đường dẫn.** Đo được: `jq '.env' package.json` bị `secrets.read-path` chặn — `normalizePath` bóc quote nên `'.env'` thành `.env` rồi khớp `**/.env`, cùng cơ chế đang chặn ĐÚNG `cat .env`. Sửa đúng cần biết SEMANTICS THAM SỐ THEO TỪNG BINARY (arg đầu của `jq`/`yq` là filter), tức thêm một tầng kiến thức per-binary. Đây là chặn oan chứ không phải lỗ an toàn: dev gặp thì escape được. Thuộc Plan 2.
+21. **Cờ mang giá trị của wrapper NGOÀI tập đã biết vẫn làm mất cưỡng chế.** `WRAPPER_VALUE_FLAGS` trong `lib/argv.mjs` liệt kê cờ theo từng wrapper (`sudo -u`, `nice -n`, `npx -p`...). Một cờ mang giá trị không có trong tập đó sẽ khiến `effectiveArgv` dừng ở giá trị của nó và lệnh thật không được soi. Tập cờ phải theo TỪNG wrapper chứ không gộp: `-p` của `sudo` mang giá trị còn `-p` của `time` thì không, nên tập gộp sẽ làm `time -p psql` lọt — đổi một lỗ thành lỗ khác.
 
 ## 16. Ẩn số cần spike trước khi code
 
