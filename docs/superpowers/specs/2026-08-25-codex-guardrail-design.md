@@ -231,6 +231,13 @@ Cùng hàm `redact()` áp lên command string trước khi ghi audit log.
 
 Rule này bổ khuyết lỗ đã thừa nhận ở §6.1: `grep -r "TOKEN" .` và `git diff` vẫn lôi được secret ra mà không hiện đường dẫn nào.
 
+**Yêu cầu bắt buộc khi làm rule này: phải quyết dứt điểm câu hỏi entropy, và ghi lại quyết định.** Đã đo (xem §15 #22) rằng phát hiện theo entropy KHÔNG dùng được ở tầng khớp-văn-bản chung. Nhưng `redact.stdout` là chỗ đầu tiên redaction gác thứ MODEL ĐỌC ĐƯỢC, nên ở đây cả giá trị lẫn rủi ro của entropy đều tăng cùng lúc:
+
+- Giá trị tăng: secret không theo khuôn nào (chuỗi sinh ngẫu nhiên) hiện chỉ lọt vào audit log cục bộ; từ rule này trở đi nó lọt vào ngữ cảnh của model.
+- Rủi ro tăng: che oan hash lockfile hay output `git log` nghĩa là làm hỏng dữ liệu model CẦN để làm việc, chứ không chỉ làm mờ một dòng log.
+
+Không được để câu hỏi này lửng. Hoặc hiện thực entropy có chặn báo oan tường minh (loại trước hex thuần, uuid, `sha\d+-`, và chỉ áp trong ngữ cảnh gán `NAME=value`), hoặc ghi rõ là cố ý không làm cùng lý do. KHÔNG được viện "để tầng CI làm": CI quét diff đã commit, một bài toán khác, và nó không phủ được stdout của tool.
+
 ## 7. Ba tầng và rule nào thuộc tầng nào
 
 | Rule | Hook local | CI/PR |
@@ -398,6 +405,34 @@ Thiếu bước 2 thì tầng thứ ba (§7) không tồn tại: dev nới polic
 19. **Liệt kê thư mục secret vẫn được.** `ls -la ~/.ssh` và `ls ~/.aws` LỌT vì pattern `~/.ssh/**` đòi dấu `/` sau tên thư mục. Cố ý cân rồi loại: liệt kê tiết lộ CÓ khoá nào tồn tại (do thám) chứ không tiết lộ NỘI DUNG khoá, và `cat ~/.ssh/id_rsa` vẫn chặn đúng. Thêm `~/.ssh` vào denyPaths sẽ chặn cả `ls` vô hại.
 20. **`jq` và `yq` bị chặn oan vì tham số đầu là filter, không phải đường dẫn.** Đo được: `jq '.env' package.json` bị `secrets.read-path` chặn — `normalizePath` bóc quote nên `'.env'` thành `.env` rồi khớp `**/.env`, cùng cơ chế đang chặn ĐÚNG `cat .env`. Sửa đúng cần biết SEMANTICS THAM SỐ THEO TỪNG BINARY (arg đầu của `jq`/`yq` là filter), tức thêm một tầng kiến thức per-binary. Đây là chặn oan chứ không phải lỗ an toàn: dev gặp thì escape được. Thuộc Plan 2.
 21. **Cờ mang giá trị của wrapper NGOÀI tập đã biết vẫn làm mất cưỡng chế.** `WRAPPER_VALUE_FLAGS` trong `lib/argv.mjs` liệt kê cờ theo từng wrapper (`sudo -u`, `nice -n`, `npx -p`...). Một cờ mang giá trị không có trong tập đó sẽ khiến `effectiveArgv` dừng ở giá trị của nó và lệnh thật không được soi. Tập cờ phải theo TỪNG wrapper chứ không gộp: `-p` của `sudo` mang giá trị còn `-p` của `time` thì không, nên tập gộp sẽ làm `time -p psql` lọt — đổi một lỗ thành lỗ khác.
+
+22. **Không có phát hiện secret theo entropy, và đây là quyết định có đo chứ không phải thiếu sót.** `lib/redact.mjs` chỉ khớp các khuôn đã biết (`AKIA`, `sk-`, `ghp_`, JWT, private key, `NAME=` với từ khoá nhạy cảm), nên secret sinh ngẫu nhiên không theo khuôn nào thì lọt. Đã cân nhắc tích hợp validator `secrets_present` của Guardrails AI (nó bọc `detect-secrets`) và đo trên máy thật:
+
+    | Số đo | Giá trị |
+    |---|---|
+    | Cài `guardrails-ai-secrets-present` | 361 MB, 107 package |
+    | `import guardrails` (cold, tiến trình mới) | 998 ms |
+    | `import` + validate một chuỗi | 925 ms |
+    | `import detect_secrets` riêng | 79 ms |
+    | Hook guardrail hiện tại | 27.8 ms p95, ngân sách 150 ms |
+
+    Hook chạy trên MỌI tool call với tiến trình mới mỗi lần, nên 925 ms vượt ngân sách hơn 6 lần — riêng con số đó đã loại đường tích hợp package. Nhưng port ngưỡng entropy sang JS (0 dependency) CŨNG không dùng được, và đây là phần đáng ghi nhất:
+
+    | Mẫu | Entropy (bit/ký tự) | Ngưỡng base64 4.5 |
+    |---|---|---|
+    | base64 secret thật | 4.78 | bắt |
+    | **base64 của văn bản thường** | **4.54** | **báo oan** |
+    | **`sha512-...` trong package-lock.json** | **5.53** | **báo oan** |
+    | git sha (40 hex) | 3.80 | dưới ngưỡng |
+    | sha256 checksum (64 hex) | 3.67 | dưới ngưỡng |
+
+    Biên giữa secret thật và base64-của-chữ chỉ **0.24 bit** — không đủ để tin. Ngưỡng hex 3.0 của `detect-secrets` còn tệ hơn ở ngữ cảnh này: git sha 3.80 và sha256 checksum 3.67 đều vượt, tức mọi output `git log` và mọi lockfile sẽ bị che oan. `detect-secrets` tránh được là vì nó chỉ soi giá trị trong quote hoặc sau dấu gán, không soi token trần — một tầng ngữ cảnh mà bản port ngây thơ không có.
+
+    Đối chiếu độ phủ trên cùng 12 mẫu: `detect-secrets` bắt 6/12, `redact.mjs` bắt 7/12. Phần chỉ `detect-secrets` bắt được đúng là 2 detector entropy; phần chỉ `redact.mjs` bắt được là `sk-` (OpenAI key), `API_TOKEN=`, `DB_PASS=`. Nên THAY `redact.mjs` bằng nó là một hồi quy, không phải nâng cấp.
+
+    Vì sao chấp nhận được ở Plan 1: `redact()` có ĐÚNG MỘT chỗ gọi trong code chạy thật (`lib/audit.mjs`, che `command` trước khi ghi log). `lib/stats.mjs` không in `command`, audit log là mode 0600 trong thư mục 0700, và `REGISTRY` chưa có `PostToolUse`. Nên khoảng trống này hiện chỉ ảnh hưởng vệ sinh của một file cục bộ riêng tư, KHÔNG ảnh hưởng thứ agent đọc được. Điều đó đổi khi `redact.stdout` ra đời — xem yêu cầu bắt buộc ở §6.9.
+
+    `detect-secrets` một mình (79 ms, không cần `guardrails-ai`) là lựa chọn hợp cho tầng CI khi tầng đó được xây: ở đó latency không quan trọng và không dev nào phải cài gì trên máy mình. Nhưng đó là bài toán KHÁC (quét diff đã commit) và không được dùng làm lý do bỏ lửng câu hỏi entropy cho `redact.stdout`.
 
 ## 16. Ẩn số cần spike trước khi code
 
