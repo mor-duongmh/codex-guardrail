@@ -71,3 +71,58 @@ test('tách 3 lệnh với && (payload thật Codex)', () => {
     ['rm', 'rg', 'test']
   );
 });
+
+// CI ma trận (lần chạy đầu tiên) cho 11 test đỏ trên cả 3 cell Windows. Nguyên
+// nhân gốc của nhóm lớn nhất: `\` là ký tự escape của shell POSIX, nên tokenizer
+// NUỐT nó — mà đường dẫn Windows đầy `\`. Đo được trên chính máy này:
+//
+//   cat C:\Users\runneradmin\.aws\credentials
+//   argv -> ["cat","C:Usersrunneradmin.awscredentials"]
+//
+// `normalizePath` CÓ đổi `\` thành `/`, nhưng nó không bao giờ được thấy dấu `\`
+// nào. Hệ quả không phải "test khó tính" mà là: trên Windows, MỌI rule khớp
+// đường dẫn đều bị vô hiệu bằng cách dùng đường dẫn native.
+//
+// Nền tảng được TIÊM, không đọc thẳng process.platform trong test: nếu không thì
+// nhánh win32 chỉ được kiểm trên CI Windows, tức nó có thể hỏng lại mà 8/9 cell
+// còn lại vẫn xanh — đúng cách lỗ này lọt qua Plan 1.
+const BS = String.fromCharCode(92);
+
+test('win32: dấu \\ trong đường dẫn được giữ nguyên', () => {
+  const cmd = `cat C:${BS}Users${BS}me${BS}.aws${BS}credentials`;
+  const argv = parseCommand(cmd, 0, 'win32')[0].argv;
+  assert.equal(argv[1], `C:${BS}Users${BS}me${BS}.aws${BS}credentials`,
+    'đường dẫn Windows bị tokenizer ăn mất dấu \\');
+});
+
+test('posix: dấu \\ vẫn là escape, không đổi hành vi cũ', () => {
+  const cmd = `cat foo${BS} bar`;
+  const argv = parseCommand(cmd, 0, 'darwin')[0].argv;
+  assert.deepEqual(argv, ['cat', 'foo bar'],
+    'escape của POSIX phải giữ nguyên — đổi nó là hồi quy trên máy dev Linux/macOS');
+});
+
+test('win32: quote vẫn hoạt động, và \\ trong quote vẫn literal', () => {
+  const cmd = `cat "C:${BS}Program Files${BS}app${BS}.env"`;
+  const argv = parseCommand(cmd, 0, 'win32')[0].argv;
+  assert.equal(argv[1], `C:${BS}Program Files${BS}app${BS}.env`);
+});
+
+// basename phải cắt được cả hai loại dấu phân cách, vì rule dùng nó để lấy tên
+// binary và trên Windows đường dẫn binary dùng `\`.
+test('basename cắt được cả / và \\', () => {
+  assert.equal(basename(`C:${BS}Program Files${BS}nodejs${BS}node.exe`), 'node.exe');
+  assert.equal(basename('/usr/local/bin/psql'), 'psql');
+});
+
+// Chứng nhân end-to-end cho đúng lỗ đã đo: đường dẫn Windows tới credential phải
+// chuẩn hoá về dạng khớp được pattern `~/.aws/**`.
+test('win32: đường dẫn native tới credential chuẩn hoá về dạng khớp pattern', async () => {
+  const { normalizePath, globToRegExp } = await import('../lib/glob.mjs');
+  const home = `C:${BS}Users${BS}me`;
+  const cmd = `cat ${home}${BS}.aws${BS}credentials`;
+  const argv = parseCommand(cmd, 0, 'win32')[0].argv;
+  const re = globToRegExp('~/.aws/**', home);
+  assert.ok(re.test(normalizePath(argv[1], home)),
+    `không khớp: ${normalizePath(argv[1], home)} vs ${re.source}`);
+});

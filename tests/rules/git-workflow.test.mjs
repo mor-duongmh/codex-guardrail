@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { resolve } from 'node:path';
 import { evaluate } from '../../lib/rules/git-workflow.mjs';
 import { loadDefaultPolicy, mergePolicy } from '../../lib/policy.mjs';
 
@@ -146,7 +147,11 @@ test('G1: protected-branch hỏi branch của thư mục -C, không phải cwd',
   const seen = [];
   const deps = { currentBranch: (cwd) => { seen.push(cwd); return 'feat/x'; } };
   evaluate(shell('git -C /other/repo push'), P, deps);
-  assert.deepEqual(seen, ['/other/repo']);
+  // `resolve()`, KHÔNG hardcode '/other/repo': git-workflow resolve đường dẫn -C,
+  // và trên Windows `resolve('/other/repo')` cho `D:\other\repo`. CI ma trận bắt
+  // được ngay lần chạy đầu — kỳ vọng cũ chỉ đúng trên POSIX, tức test khẳng định
+  // một điều về nền tảng của người viết nó chứ không về hành vi của rule.
+  assert.deepEqual(seen, [resolve('/other/repo')]);
 
   const seen2 = [];
   const deps2 = { currentBranch: (cwd) => { seen2.push(cwd); return 'feat/x'; } };

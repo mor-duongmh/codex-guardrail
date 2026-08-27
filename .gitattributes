@@ -1,0 +1,10 @@
+# Checkout LF trên MỌI nền tảng. Lý do cụ thể, không phải nếp chung: CI ma trận
+# (lần chạy đầu) cho tests/readme.test.mjs đỏ trên cả 3 cell Windows, vì git
+# checkout README.md thành CRLF còn TRUST_NOTICE trong lib/install.mjs là LF, nên
+# phép so "README phải trích NGUYÊN VĂN khối hướng dẫn trust" luôn sai.
+#
+# Sửa ở đây thay vì normalize trong test: khối trust là thứ DUY NHẤT người dùng
+# phải tự làm, và test đó tồn tại để một bản README sửa lời văn không lệch âm
+# thầm khỏi lib. Nếu test tự normalize EOL thì nó vẫn bảo vệ được, nhưng mọi test
+# so-khớp-văn-bản khác trong repo lại phải tự nhớ làm điều đó.
+* text=auto eol=lf
