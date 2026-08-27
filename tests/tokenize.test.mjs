@@ -2,7 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseCommand, basename } from '../lib/tokenize.mjs';
 
-const bins = (cmd) => parseCommand(cmd).map(s => basename(s.argv[0]));
+// platform mặc định 'darwin', KHÔNG lấy process.platform: các test dưới đây
+// khẳng định hành vi của shell POSIX, nên chúng phải nói rõ điều đó. Để mặc
+// định theo máy chạy thì cùng một test lại kiểm hai hành vi khác nhau tuỳ OS —
+// đúng cách test `backslash escape` đỏ trên CI Windows sau khi tokenizer thôi
+// coi `\` là escape trên win32.
+const bins = (cmd, platform = 'darwin') =>
+  parseCommand(cmd, 0, platform).map(s => basename(s.argv[0]));
 
 test('lệnh thường', () => {
   assert.deepEqual(bins('psql -h localhost'), ['psql']);
@@ -30,8 +36,14 @@ test('quote rời vẫn ra psql', () => {
   assert.deepEqual(bins('p"s"ql'), ['psql']);
 });
 
-test('backslash escape', () => {
-  assert.deepEqual(bins('ps\\ql'), ['psql']);
+test('backslash escape (POSIX)', () => {
+  assert.deepEqual(bins('ps\\ql', 'darwin'), ['psql']);
+});
+
+// Cùng input, nền tảng khác, kết quả PHẢI khác: trên Windows `\` là dấu phân
+// cách đường dẫn nên `ps\ql` là đường dẫn tới binary `ql`, không phải `psql`.
+test('backslash KHÔNG escape trên win32', () => {
+  assert.deepEqual(bins('ps\\ql', 'win32'), ['ql']);
 });
 
 test('tách theo ; && || | và newline', () => {

@@ -154,7 +154,7 @@ test('có đủ bản ghi trust thì ok=true nhưng vẫn nói rõ không kiểm
   writeTrust(home, [[0, 0], [1, 0]]);
   const res = diagnose(repo());
   const out = res.lines.join('\n');
-  assert.equal(res.ok, true);
+  assert.equal(res.ok, true, `ok=false, output:\n${res.lines.join('\n')}`);
   assert.ok(out.includes('⚠ Có bản ghi trust cho đủ 2 entry của guardrail.'));
   assert.ok(out.includes('KHÔNG kiểm được hash'));
   // Ngay cả nhánh tốt nhất cũng không được in ✓ cho trust.
@@ -202,7 +202,7 @@ test('bản ghi trust ở ĐÚNG vị trí lệch thì được tính', () => {
   install({ sourceDir: SOURCE });
   writeTrust(home, [[2, 0], [3, 0]]);
   const res = diagnose(repo());
-  assert.equal(res.ok, true);
+  assert.equal(res.ok, true, `ok=false, output:\n${res.lines.join('\n')}`);
   assert.ok(res.lines.join('\n').includes('⚠ Có bản ghi trust cho đủ 2 entry'));
 });
 
@@ -351,7 +351,8 @@ test('không tìm được .git thì cảnh báo chứ không ném', () => {
 
 test('nền wiring lành thì ok=true — mốc cho các test hạ ok bên dưới', () => {
   healthy();
-  assert.equal(diagnose(repo()).ok, true);
+  const base = diagnose(repo());
+  assert.equal(base.ok, true, `ok=false, output:\n${base.lines.join('\n')}`);
 });
 
 test('policy hỏng hạ ok kể cả khi wiring đã lành', () => {
@@ -504,6 +505,6 @@ test('không có codex trên PATH thì doctor nói thẳng ca app desktop', () =
 test('codex chạy được thì báo ✓ và không hạ ok', () => {
   healthy();
   const res = withPath(binDir('ok'), () => diagnose(repo()));
-  assert.equal(res.ok, true);
+  assert.equal(res.ok, true, `ok=false, output:\n${res.lines.join('\n')}`);
   assert.ok(res.lines.join('\n').includes('✓ Codex CLI: '));
 });
