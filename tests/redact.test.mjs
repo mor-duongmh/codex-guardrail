@@ -333,3 +333,57 @@ test('che: Authorization không có quote bao quanh vẫn được che (nhánh b
   const out = redact(cmd);
   assert.ok(!out.includes('abc123'));
 });
+
+// Pattern env-sensitive là `\b(.*?_(SECRET|TOKEN|...))=`, tức BẮT BUỘC có dấu
+// gạch dưới trước từ khoá. Hệ quả đo được: `DB_PASSWORD=x` được che nhưng
+// `PASSWORD=x` LỌT — đúng những tên biến phổ biến nhất lại vào audit log ở dạng
+// thô. Tên biến trần là dạng hay gặp nhất trong lệnh một dòng.
+test('che cả tên biến TRẦN, không chỉ tên có tiền tố', () => {
+  for (const [cmd, want] of [
+    ['PASSWORD=hunter2', 'PASSWORD=***'],
+    ['SECRET=abc123', 'SECRET=***'],
+    ['TOKEN=xyz789', 'TOKEN=***'],
+    ['PASSWD=p', 'PASSWD=***'],
+    ['CREDENTIALS=c', 'CREDENTIALS=***'],
+    ['APIKEY=k', 'APIKEY=***'],
+  ]) {
+    assert.equal(redact(cmd), want, `ca: ${cmd}`);
+  }
+});
+
+test('tên có tiền tố vẫn che như trước', () => {
+  for (const [cmd, want] of [
+    ['DB_PASSWORD=hunter2', 'DB_PASSWORD=***'],
+    ['API_TOKEN=xyz', 'API_TOKEN=***'],
+    ['MY_SECRET=abc', 'MY_SECRET=***'],
+    ['AWS_ACCESS_KEY=k', 'AWS_ACCESS_KEY=***'],
+  ]) {
+    assert.equal(redact(cmd), want, `ca: ${cmd}`);
+  }
+});
+
+// Bỏ ràng buộc gạch dưới KHÔNG được biến thành "hễ tên kết thúc bằng từ khoá là
+// che". `MONKEY` kết thúc bằng `KEY`, `BYPASS` kết thúc bằng `PASS`: tiền tố
+// phải là tuỳ chọn NHƯNG nếu có thì phải kết bằng `_`, nên `MON` + `KEY` không
+// khớp. Đây là chỗ một bản sửa cẩu thả (`(.*?(KEY|...))=`) sẽ chặn oan.
+test('không che biến chỉ vô tình kết thúc bằng từ khoá', () => {
+  for (const cmd of ['MONKEY=banana', 'BYPASS=1', 'TURKEY=x', 'DONKEY=y']) {
+    assert.equal(redact(cmd), cmd, `ca: ${cmd} bị che oan`);
+  }
+});
+
+// Guardrail không được coi một biến đủ nhạy cảm để CHẶN rồi tự ghi giá trị của
+// nó vào audit log ở dạng thô. Đo được lúc lệch: `printenv PASSWD` và
+// `printenv APIKEY` bị rules/secrets.mjs chặn, nhưng redact.mjs không che
+// `PASSWD=` / `APIKEY=` vì hai danh sách từ khoá khác nhau.
+test('mọi biến bị rule chặn đều được redact che', async () => {
+  const { evaluate } = await import('../lib/rules/secrets.mjs');
+  const { loadDefaultPolicy } = await import('../lib/policy.mjs');
+  const P = loadDefaultPolicy();
+  for (const name of ['PASSWORD', 'PASSWD', 'SECRET', 'TOKEN', 'APIKEY', 'CREDENTIALS']) {
+    const blocked = evaluate({ tool: 'Bash', command: `printenv ${name}`, patchFiles: [] }, P);
+    assert.equal(blocked.decision, 'deny', `rule không chặn printenv ${name}`);
+    assert.equal(redact(`${name}=synthetic`), `${name}=***`,
+      `rule chặn ${name} nhưng redact không che ${name}=`);
+  }
+});
