@@ -72,6 +72,12 @@ là file của họ). Tầng 2 và 3 tồn tại chính vì thế.
 | `git` | branch được bảo vệ `main`, `master`, `develop`, `release/*`; cờ phá huỷ; commit message lệch convention |
 | `selfprotect` | sửa/xoá chính `hooks.json`, `codex-guardrail.json`, thư mục runtime của guardrail |
 
+`policy/default.json` còn khai bốn nhóm nữa — `convention`, `quality`, `net`,
+`deps` — mà bản này **chưa có rule nào cưỡng chế**. Chúng để dành cho bản sau.
+`guardrail doctor` in ⚠ cho từng nhóm kèm số lượng, nên đừng đọc
+`quality.protectedPaths` hay `deps.enabled: true` trong file policy như thể
+chúng đang có hiệu lực — 9 mẫu đường dẫn của `quality` hiện không bảo vệ gì.
+
 Nới cho một dự án: tạo `codex-guardrail.json` ở gốc repo đó. Mảng thì **hợp**
 với mặc định chứ không thay thế, nên thêm `infra.allowBinaries: ["supabase"]` là
 thêm vào, không mất phần còn lại. Tạo file bằng tay: bản này chưa có subcommand
