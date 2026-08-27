@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { diagnose } from '../lib/doctor.mjs';
 import { install } from '../lib/install.mjs';
@@ -22,7 +22,11 @@ function sandbox() {
   // thì mọi test "wiring lành" sẽ đỏ trên CI (runner không có Codex CLI) —
   // tức test phụ thuộc máy chạy. PREPEND chứ không thay PATH, để `node` trong
   // các test spawnSync vẫn tìm được.
-  process.env.PATH = `${binDir('ok')}:${process.env.PATH}`;
+  // `delimiter`, KHÔNG ':' hardcode. Helper này mắc ĐÚNG lỗi vừa vá trong
+  // lib/install.mjs: trên Windows PATH phân tách bằng ';', nên nối bằng ':'
+  // tạo ra một entry rác và `codex` giả không bao giờ được tìm thấy — doctor
+  // báo 'không tìm thấy codex trên PATH' rồi hạ ok, làm 4 test trust đỏ theo.
+  process.env.PATH = `${binDir('ok')}${delimiter}${process.env.PATH}`;
   return dir;
 }
 
