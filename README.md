@@ -36,7 +36,10 @@ khi bạn làm xong:
 
   1. Mở Codex CLI
   2. Gõ: /hooks
-  3. Duyệt và cấp tin cậy (grant trust) cho các mục codex-guardrail
+  3. Tìm HAI mục PreToolUse có lệnh chứa guardrail/bin/guardrail.mjs
+     (matcher "Bash" và matcher "apply_patch") rồi cấp tin cậy cho cả hai.
+     Danh sách KHÔNG hiện chữ "codex-guardrail" — hooks.json chỉ chứa đường dẫn
+     lệnh, nên hãy nhận diện bằng đoạn guardrail.mjs.
 
   Chỉ phải làm MỘT LẦN. Sửa codex-guardrail.json về sau không làm mất tin cậy,
   vì rule nằm trong file policy chứ không nằm trong lệnh hook.
