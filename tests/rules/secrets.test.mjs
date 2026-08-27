@@ -477,3 +477,55 @@ test('không được khoét allowPath dạng `**` bên trong cây ~/.kube', () 
     assert.equal(r.decision, 'deny', `allowPath \`**\` đã mở đường đi vòng: ${cmd}`);
   }
 });
+
+// Lỗ này ĐÃ TỪNG được đo là đúng ở Task 6 nhưng KHÔNG có gì khoá lại, rồi hồi
+// quy im lặng: `checkEnvDump` soi `sub.argv[0]`/`sub.argv[1]` theo VỊ TRÍ, nên
+// mọi tiền tố wrapper đẩy vị trí đi một bước và rule không được cưỡng chế.
+// Ba rule kia đã đi qua `effectiveArgv`; chỉ `secrets` còn sót lại vì nó được
+// viết TRƯỚC khi `lib/argv.mjs` được tách ra. Danh sách wrapper ở đây dán CỨNG,
+// không import từ argv.mjs: import thì một bản `WRAPPERS` bị thu hẹp vẫn xanh.
+test('env-dump được cưỡng chế qua mọi lớp wrapper', () => {
+  const wrapped = [
+    'sudo printenv PASSWORD', 'doas printenv PASSWORD', 'npx printenv PASSWORD',
+    'bunx printenv PASSWORD', 'npm exec printenv PASSWORD', 'pnpm dlx printenv PASSWORD',
+    'yarn dlx printenv PASSWORD', 'bun x printenv PASSWORD', 'time printenv PASSWORD',
+    'nice printenv PASSWORD', 'sudo printenv AWS_SECRET_ACCESS_KEY',
+    'sudo env', 'npx env', 'time env', 'sudo set',
+  ];
+  for (const cmd of wrapped) {
+    assert.equal(evaluate(shell(cmd), P).ruleId, 'secrets.env-dump', `ca: ${cmd}`);
+  }
+});
+
+test('env-dump được cưỡng chế trong điều kiện và vòng lặp', () => {
+  for (const cmd of ['if printenv PASSWORD; then echo x; fi', 'while printenv TOKEN; do sleep 1; done']) {
+    assert.equal(evaluate(shell(cmd), P).ruleId, 'secrets.env-dump', `ca: ${cmd}`);
+  }
+});
+
+// Bóc wrapper KHÔNG được biến lệnh vô hại thành bị chặn. `docker` mở đầu bằng
+// `do`, `ifconfig` bằng `if` — khớp theo tiền tố thay vì theo token sẽ làm
+// những lệnh này rơi vào nhánh env-dump.
+test('bóc wrapper không chặn oan lệnh thật', () => {
+  for (const cmd of ['docker ps', 'ifconfig en0', 'iftop -i en0', 'env PATH=/opt/bin ls', 'command -v printenv', 'printenv PATH']) {
+    assert.equal(evaluate(shell(cmd), P).decision, 'allow', `ca: ${cmd}`);
+  }
+});
+
+// Cùng lớp lỗi vị trí với env-dump, ở vòng lặp `manager-read`. Nguy hiểm hơn ở
+// hai điểm: `vault` và `op` KHÔNG nằm trong infra.denyBinaries nên không có rule
+// nào đỡ, và với aws/gcloud/kubectl thì infra đỡ được nhưng báo sai ruleId —
+// một dev nới `infra.deny-binary` để dùng `aws s3 ls` sẽ mở lại
+// `sudo aws secretsmanager get-secret-value` mà không hay biết.
+test('manager-read được cưỡng chế qua mọi lớp wrapper', () => {
+  const cases = [
+    'sudo vault read secret/prod', 'npx vault read secret/prod',
+    'sudo op read op://vault/item/field', 'time op read op://vault/item/field',
+    'sudo aws secretsmanager get-secret-value --secret-id x',
+    'sudo gcloud secrets versions access latest --secret=x',
+    'sudo kubectl get secret my-secret -o yaml',
+  ];
+  for (const cmd of cases) {
+    assert.equal(evaluate(shell(cmd), P).ruleId, 'secrets.manager-read', `ca: ${cmd}`);
+  }
+});
