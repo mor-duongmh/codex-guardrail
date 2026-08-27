@@ -156,12 +156,12 @@ test('G1: protected-branch hỏi branch của thư mục -C, không phải cwd',
   const seen2 = [];
   const deps2 = { currentBranch: (cwd) => { seen2.push(cwd); return 'feat/x'; } };
   evaluate(shell('git -C sub push'), P, deps2);
-  assert.deepEqual(seen2, ['/tmp/demo/sub'], '-C tương đối phải resolve theo cwd');
+  assert.deepEqual(seen2, [resolve('/tmp/demo/sub')], '-C tương đối phải resolve theo cwd');
 
   const seen3 = [];
   const deps3 = { currentBranch: (cwd) => { seen3.push(cwd); return 'feat/x'; } };
   evaluate(shell('git push'), P, deps3);
-  assert.deepEqual(seen3, ['/tmp/demo'], 'không có -C thì giữ nguyên cwd');
+  assert.deepEqual(seen3, [resolve('/tmp/demo')], 'không có -C thì giữ nguyên cwd');
 });
 
 // ---------------------------------------------------------------------------
