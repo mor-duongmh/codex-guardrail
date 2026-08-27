@@ -408,3 +408,36 @@ test('CLI doctor không in lại nội dung config.toml', () => {
   assert.ok(!res.stdout.includes(secret));
   assert.ok(!res.stderr.includes(secret));
 });
+
+// `policy/default.json` khai 4 nhóm mà registry của bản này KHÔNG có rule nào:
+// convention, quality, net, deps. doctor đã nói đúng về convention.lint nhưng IM
+// LẶNG với ba nhóm còn lại — trong khi `quality.protectedPaths` có 9 mẫu thật
+// (`.github/workflows/**`, `package-lock.json`, `dist/**`) và `deps` ghi thẳng
+// `"enabled": true`. Một dev đọc policy sẽ tin những thứ đó đang được bảo vệ.
+// Không hề. Đây là cùng lớp lỗi với việc README hàm ý phủ nhiều hơn thực tế.
+test('doctor nói ra ba nhóm policy không có rule nào cưỡng chế', () => {
+  sandbox();
+  const out = diagnose(repo()).lines.join('\n');
+  for (const id of ['quality.protectedPaths', 'net.allowHosts', 'deps.enabled']) {
+    assert.ok(out.includes(`⚠ ${id}`), `thiếu cảnh báo cho ${id}\n${out}`);
+    assert.ok(!out.includes(`✓ ${id}`), `${id} bị in ✓ — hứa một tầng bảo vệ không tồn tại`);
+  }
+  // Phải nêu SỐ LƯỢNG thật, không chỉ nói chung: 9 mẫu và 7 host là mức độ mà
+  // dev cần thấy để biết mình đang mất bao nhiêu.
+  assert.ok(/quality\.protectedPaths — có 9 /.test(out), `thiếu số mẫu quality\n${out}`);
+  assert.ok(/net\.allowHosts — có 7 /.test(out), `thiếu số host net\n${out}`);
+  assert.ok(out.includes('KHÔNG cưỡng chế'), 'phải nói thẳng là không cưỡng chế gì');
+});
+
+// Chiều ngược lại: tắt tường minh thì đừng sinh nhiễu. `deps.enabled` là boolean
+// nên mergePolicy thay thế được; hai nhóm kia là MẢNG nên mergePolicy hợp chứ
+// không thay, tức project KHÔNG tắt được chúng — cảnh báo là đúng và luôn hiện.
+test('deps tắt tường minh thì doctor không cảnh báo nữa', () => {
+  sandbox();
+  const dir = repo({ 'codex-guardrail.json': JSON.stringify({ deps: { enabled: false } }) });
+  const out = diagnose(dir).lines.join('\n');
+  assert.ok(!out.includes('deps.enabled'), `deps đã tắt mà vẫn cảnh báo\n${out}`);
+  // Hai nhóm mảng vẫn phải cảnh báo, để test này không âm thầm che cả ba.
+  assert.ok(out.includes('⚠ quality.protectedPaths'));
+  assert.ok(out.includes('⚠ net.allowHosts'));
+});
