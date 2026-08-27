@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +18,36 @@ function sandbox() {
   const dir = mkdtempSync(join(tmpdir(), 'guardrail-doctor-'));
   process.env.CODEX_HOME = dir;
   process.env.GUARDRAIL_AUDIT_PATH = join(dir, 'audit.jsonl');
+  // Cũng phải tiêm cả `codex` chạy được: doctor kiểm binary đó, và không tiêm
+  // thì mọi test "wiring lành" sẽ đỏ trên CI (runner không có Codex CLI) —
+  // tức test phụ thuộc máy chạy. PREPEND chứ không thay PATH, để `node` trong
+  // các test spawnSync vẫn tìm được.
+  process.env.PATH = `${binDir('ok')}:${process.env.PATH}`;
   return dir;
+}
+
+// Ba trạng thái của binary `codex` trên PATH. Dùng filesystem THẬT thay vì mock
+// `fs`, vì điểm cốt yếu của phép kiểm là hành vi thật của symlink treo:
+// existsSync ĐI THEO symlink nên trả false, còn lstatSync thì thành công. Mock
+// sẽ bỏ mất đúng chi tiết đó.
+function binDir(kind) {
+  const d = mkdtempSync(join(tmpdir(), 'guardrail-bin-'));
+  const p = join(d, 'codex');
+  if (kind === 'ok') {
+    writeFileSync(p, '#!/bin/sh\nexit 0\n');
+    chmodSync(p, 0o755);
+  }
+  if (kind === 'broken') {
+    // Dựng lại đúng ca đã gặp trên máy thật: symlink Homebrew còn, thân cask mất.
+    symlinkSync(join(d, 'Caskroom', 'codex', '0.130.0', 'codex-aarch64-apple-darwin'), p);
+  }
+  return d;
+}
+
+function withPath(dir, fn) {
+  const prev = process.env.PATH;
+  process.env.PATH = dir;
+  try { return fn(); } finally { process.env.PATH = prev; }
 }
 
 function repo(files = {}) {
@@ -440,4 +469,41 @@ test('deps tắt tường minh thì doctor không cảnh báo nữa', () => {
   // Hai nhóm mảng vẫn phải cảnh báo, để test này không âm thầm che cả ba.
   assert.ok(out.includes('⚠ quality.protectedPaths'));
   assert.ok(out.includes('⚠ net.allowHosts'));
+});
+
+// Đo được trên máy thật: `/opt/homebrew/bin/codex` là symlink tới cask
+// `0.130.0` đã bị xoá, nên KHÔNG có Codex CLI nào chạy. Guardrail cài xong,
+// hooks.json đúng, trust có bản ghi — mà chặn 0 thứ, vì không ai đọc hooks.json.
+// doctor cũ báo "✓ Đã cài" và exit 0 trong đúng tình trạng đó. Đây là chế độ
+// hỏng tệ nhất của một công cụ an toàn: nó nói bạn đang được bảo vệ.
+test('symlink codex treo thì doctor báo ✗ và hạ ok', () => {
+  healthy();
+  const res = withPath(binDir('broken'), () => diagnose(repo()));
+  const out = res.lines.join('\n');
+  assert.equal(res.ok, false, 'symlink treo phải hạ ok, không được chỉ cảnh báo');
+  assert.ok(out.includes('✗ Codex CLI hỏng'), out);
+  assert.ok(out.includes('brew reinstall --cask codex'), 'phải nói cách sửa, không chỉ nói hỏng');
+  assert.ok(!out.includes('✓ Codex CLI'), 'không được vừa ✓ vừa ✗ cho cùng một thứ');
+});
+
+// Ca app ChatGPT desktop. Đo được: app đó có hệ thống hooks riêng (có cả event
+// `PreToolUse` trong Settings) nhưng `app.asar` 269MB có 0 hit `hooks.json` và
+// 0 hit `codex_hooks` — nó KHÔNG đọc file hook của Codex CLI. Nên "không có
+// codex trên PATH" là tín hiệu thật rằng bản cài này không bảo vệ gì, và doctor
+// phải nói ra ca đó chứ không chỉ báo thiếu binary.
+test('không có codex trên PATH thì doctor nói thẳng ca app desktop', () => {
+  healthy();
+  const empty = mkdtempSync(join(tmpdir(), 'guardrail-nobin-'));
+  const res = withPath(empty, () => diagnose(repo()));
+  const out = res.lines.join('\n');
+  assert.equal(res.ok, false);
+  assert.ok(out.includes('Không tìm thấy codex trên PATH'), out);
+  assert.ok(out.includes('ChatGPT'), 'phải nêu ca app desktop — đo được là nó không đọc hooks.json');
+});
+
+test('codex chạy được thì báo ✓ và không hạ ok', () => {
+  healthy();
+  const res = withPath(binDir('ok'), () => diagnose(repo()));
+  assert.equal(res.ok, true);
+  assert.ok(res.lines.join('\n').includes('✓ Codex CLI: '));
 });
