@@ -83,8 +83,14 @@ chúng đang có hiệu lực — 9 mẫu đường dẫn của `quality` hiện
 
 Nới cho một dự án: tạo `codex-guardrail.json` ở gốc repo đó. Mảng thì **hợp**
 với mặc định chứ không thay thế, nên thêm `infra.allowBinaries: ["supabase"]` là
-thêm vào, không mất phần còn lại. Tạo file bằng tay: bản này chưa có subcommand
-sinh sẵn (để lại plan sau), và không chỗ nào chỉ bạn tới lệnh chưa tồn tại.
+thêm vào, không mất phần còn lại.
+
+`guardrail init` sinh sẵn file đó bằng cách **suy ra từ repo**: default branch từ
+`origin/HEAD`, quy ước commit từ 50 commit gần nhất, lệnh lint từ `package.json`
+/ `Makefile` / `pyproject.toml` / `composer.json`, và file quy ước từ những file
+có thật. Thiếu thông tin thì nó **để trống chứ không đoán** — đáng chú ý nhất:
+nếu repo chưa theo conventional commits thì nó KHÔNG áp quy ước đó, vì áp bừa sẽ
+chặn oan mọi commit tiếp theo. `init` **không ghi đè** file đang có.
 
 ## Escape
 
