@@ -529,3 +529,34 @@ test('manager-read được cưỡng chế qua mọi lớp wrapper', () => {
     assert.equal(evaluate(shell(cmd), P).ruleId, 'secrets.manager-read', `ca: ${cmd}`);
   }
 });
+
+// Vòng quét token của read-path đọc `sub.argv` THÔ, nên dấu `)` của nhóm lệnh
+// dính vào token cuối và phá so khớp. Hệ quả KHÔNG đều: pattern kết bằng tên
+// file chính xác (`**/.env`, `**/id_rsa`) bị lách, còn pattern cây `**`
+// (`~/.aws/**`) vẫn chặn được vì `**` hút luôn dấu `)`. Nghĩa là lỗ này chỉ hở
+// đúng những pattern chính xác nhất — dễ tin là đã an toàn.
+// `(cd app && cat .env)` là dạng lệnh agent viết rất tự nhiên, không phải lách.
+// infra và self-protect miễn nhiễm vì đã dùng stripTrailingGroup; đây là rule
+// thứ tư của cùng một lớp lỗi.
+test('read-path được cưỡng chế trong nhóm lệnh và subshell', () => {
+  const cases = [
+    '(cat .env)',
+    '(cat .env);',
+    '(cd app && cat .env)',
+    'echo x; (cat .env)',
+    '(sudo cat .env)',
+    '(cat src/.env)',
+    '(cat ~/.ssh/id_rsa)',
+    '{ cat .env; }',
+  ];
+  for (const cmd of cases) {
+    assert.equal(evaluate(shell(cmd), P).ruleId, 'secrets.read-path', `ca: ${cmd}`);
+  }
+});
+
+// Bóc `)` không được biến file được miễn thành bị chặn.
+test('bóc dấu nhóm không chặn oan file được miễn', () => {
+  for (const cmd of ['(cat .env.example)', '(cat ~/.ssh/known_hosts)', '(cat ~/.ssh/id_rsa.pub)']) {
+    assert.equal(evaluate(shell(cmd), P).decision, 'allow', `ca: ${cmd}`);
+  }
+});
