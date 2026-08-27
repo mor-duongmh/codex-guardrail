@@ -161,7 +161,11 @@ test('G1: protected-branch hỏi branch của thư mục -C, không phải cwd',
   const seen3 = [];
   const deps3 = { currentBranch: (cwd) => { seen3.push(cwd); return 'feat/x'; } };
   evaluate(shell('git push'), P, deps3);
-  assert.deepEqual(seen3, [resolve('/tmp/demo')], 'không có -C thì giữ nguyên cwd');
+  // KHÔNG resolve ở đây, có ý: chỉ đường dẫn của `-C` được resolve, còn khi
+  // không có `-C` thì rule truyền ctx.cwd NGUYÊN VĂN. Đó là hành vi thật, và
+  // CI Windows chỉ ra: bọc resolve() vào đây làm kỳ vọng thành D:\\tmp\\demo
+  // trong khi rule trả '/tmp/demo'.
+  assert.deepEqual(seen3, ['/tmp/demo'], 'không có -C thì giữ nguyên cwd');
 });
 
 // ---------------------------------------------------------------------------
