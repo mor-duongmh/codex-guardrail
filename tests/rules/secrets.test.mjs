@@ -224,9 +224,9 @@ test('cho qua command substitution hợp lệ', () => {
 const HOME_ONLY = [
   ['~/.aws/**', '~/.aws/config'],
   ['~/.config/gcloud/**', '~/.config/gcloud/access_tokens.db'],
-  ['~/.kube/config', '~/.kube/config'],
+  ['~/.kube/**', '~/.kube/config'],
   ['~/.ssh/**', '~/.ssh/my_custom_key'],
-  ['~/.docker/config.json', '~/.docker/config.json'],
+  ['~/.docker/config.json*', '~/.docker/config.json'],
 ];
 
 test('chặn đủ 5 đường dẫn ~ trong secrets.denyPaths, dạng ~', () => {

@@ -668,3 +668,25 @@ test('F4: refspec không có `+` đứng đầu, và `+` ở lệnh khác, vẫn
     assert.equal(r.decision, 'allow', `chặn oan: ${cmd} => ${r.ruleId} ${r.reason ?? ''}`);
   }
 });
+
+// Codex nối `. Command: <lệnh>` NGAY SAU reason, nên một message dài biến deny
+// thành khối chữ không đọc được trên terminal. Đo được trước khi cắt: message
+// 8000B cho stdout 8475B — vượt 8192, đúng ngưỡng mà lớp lỗi cắt cụt stdout
+// (đã vá bằng process.exitCode ở Task 10) từng làm mất chính cái deny. Cắt ở
+// đây là lớp phòng thủ thứ hai cho cùng chế độ hỏng đó.
+test('reason của commit-message không phình theo độ dài message', () => {
+  const long = 'x'.repeat(5000);
+  const r = evaluate(shell(`git commit -m "${long}"`), P);
+  assert.equal(r.ruleId, 'git.commit-message');
+  assert.ok(r.reason.length < 400, `reason dài ${r.reason.length}B, phải dưới 400B`);
+  assert.ok(r.reason.includes('…'), 'phải có dấu lược để người đọc biết bị cắt');
+  // Vẫn phải thấy được ĐẦU message, vì đó là thứ giúp dev nhận ra commit nào.
+  assert.ok(r.reason.includes('xxxxxxxxxx'), 'phải giữ phần đầu message');
+});
+
+test('message ngắn không bị cắt và không có dấu lược', () => {
+  const r = evaluate(shell('git commit -m "sua loi dang nhap"'), P);
+  assert.equal(r.ruleId, 'git.commit-message');
+  assert.ok(r.reason.includes('sua loi dang nhap'), 'message ngắn phải hiện nguyên văn');
+  assert.ok(!r.reason.includes('…'), 'không được có dấu lược khi không cắt');
+});
