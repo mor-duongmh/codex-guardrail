@@ -71,6 +71,41 @@ cho qua            | apply_patch src/index.js
 
 ruleId là của **dự án**, nên khoá escape cũng theo dự án. Nhóm này không cần gì mới.
 
+### 2.7 Phiên Codex thật KHÔNG có project root — và đó là trạng thái thường, không phải ca biên
+
+Đo được 2026-08-28 trên máy lead, và đây là số đo đổi hướng nhiều nhất trong spec này.
+
+Entry thật từ phiên Codex:
+
+```json
+{"ts":"2026-08-28T07:45:15.524Z","ruleId":"infra.deny-binary","repo":null,"branch":null,
+ "cwd":"/Users/haiduong","command":"psql --version","permissionMode":"default"}
+```
+
+`pwd` chạy trong CHÍNH phiên đó in `/Users/haiduong`. Nên:
+
+- `cwd` Codex gửi là **đúng** — schema khai `cwd` là trường BẮT BUỘC, và giá trị khớp `pwd`
+- `findProjectRoot` trả null là **đúng** — home không có `.git`
+- **Không có bug nào trong guardrail.** Lead mở Codex từ home, không từ thư mục dự án.
+
+Hệ quả, và nó nghiêm trọng:
+
+```
+ctx.projectRoot = null
+  -> loadPolicy(null) trả CHỈ policy mặc định
+  -> codex-guardrail.json của dự án KHÔNG BAO GIỜ được đọc
+```
+
+| Thứ | Trạng thái khi mở Codex từ home |
+|---|---|
+| `infra.allowBinaries` nới qua PR | vô hiệu |
+| `selfProtect.protectedPaths` dự án thêm (kể cả `deploy.script`) | vô hiệu |
+| `git.protected-branch` | không biết branch |
+| `deploy.entrypoints` / `deploy.targets` | vô hiệu |
+| CODEOWNERS gác file policy (tầng 3) | không có tác dụng |
+
+**Đây là cách team đang thực sự dùng**, nên nhóm `deploy` phải coi ca này là trạng thái hạng nhất, không phải ca biên. Xem §3.10.
+
 ### 2.6 Bịt ở mức subcommand: đo được, không cần code
 
 `docker push` không được chặn bằng cách thêm `docker` vào `denyBinaries` — dev dùng `docker ps`/`build`/`compose` liên tục. Nhưng `infra.denyPatterns` khớp **tiền tố của lệnh hữu hiệu từng segment**, nên nó bịt được ở mức subcommand. Đây là cơ chế đang chặn `npm publish` sẵn.
@@ -139,8 +174,22 @@ Ngân sách độ trễ hiện tại: hook p95 **27.8ms**, ngân sách §13 spec
    Đã làm để biết mà không phải dựng phiên spike: `buildContext` đọc `permission_mode` vào ctx và `dispatch` ghi nó vào audit log. Lần chạy bất kỳ tiếp theo trong Codex sẽ lộ chế độ thật, miễn phí. Bắt buộc còn lại:
 
    - ~~`buildContext` phải đọc `permission_mode` vào ctx.~~ **XONG** — cộng ghi vào audit log.
-   - Nhóm `deploy` chỉ phát `ask` khi mode KHÔNG phải chế độ bỏ qua quyền. Ở chế độ bỏ qua quyền, `ask` **hạ về `deny`** và dùng `requireHumanEscape` (§5.6) làm cửa duy nhất.
+   - Nhóm `deploy` chỉ phát `ask` khi mode KHÔNG phải chế độ bỏ qua quyền. Ở chế độ bỏ qua quyền, `ask` **hạ về `deny`** và dùng `requireHumanEscape` (§5.8) làm cửa duy nhất.
    - Chưa đo được hành vi thật của `ask` dưới `bypassPermissions` thì thiết kế phải GIẢ ĐỊNH nó không hỏi. Xem §11.4.
+
+10. **Không có project root thì `deploy.*` CHẶN TẤT CẢ, và nói rõ vì sao.** Đo được ở §2.7: phiên thật không có project root, nên `deploy.targets` rỗng.
+
+    Điểm cốt yếu là một tính chất bất đối xứng đáng ghi thành nguyên tắc chung: **rule kiểu DENY-LIST suy giảm êm về mặc định; rule kiểu ALLOW-LIST suy giảm thành chặn tất cả.** `secrets` và `infra` vẫn bảo vệ tốt bằng danh sách mặc định vì chúng liệt kê cái BỊ CẤM. `deploy` liệt kê cái ĐƯỢC PHÉP, nên không có dữ liệu dự án nghĩa là không có đích nào được phép — mọi deploy bị chặn.
+
+    Ba lựa chọn, và lý do chọn cái thứ nhất:
+
+    - **(chọn) Chặn, kèm message chỉ đúng nguyên nhân.** Fail-closed, và deploy từ một phiên không biết mình đang ở dự án nào thì đúng là không nên chạy.
+    - Để rơi vào `deploy.undeclared-target`: cùng kết quả nhưng message sai hướng — nó bảo "khai target vào file policy", trong khi file đó không được đọc.
+    - Cho qua: không xét, deploy là hành động không hoàn tác được.
+
+    ruleId riêng `deploy.no-project-root` để message nói được nguyên nhân thật, và để escape của nó không lẫn với `deploy.undeclared-target`.
+
+    Hạ tầng cho việc này ĐÃ CÓ (làm 2026-08-28, ngoài spec này): `doctor` đọc audit log và báo `✗ N/M lần chạy hook KHÔNG tìm được project root` kèm cwd thật; và deny message của mọi rule tự thêm cảnh báo `⚠ Đang chạy POLICY MẶC ĐỊNH` khi `projectRoot` là null.
 
 ---
 
@@ -166,7 +215,25 @@ Guardrail không cần *hiểu* deploy. Nó đảm bảo: **có chỉ định r�
 
 Nhóm `deploy` là **rule an toàn** (§10 spec chính): ném exception thì fail-closed.
 
-### 5.1 `deploy.no-target` — `PreToolUse: Bash`
+### 5.1 `deploy.no-project-root` — `PreToolUse: Bash`
+`deploy.no-project-root` — `PreToolUse: Bash`
+
+Lệnh khớp một entrypoint (hoặc khớp `denyDirect`) nhưng `ctx.projectRoot` là null.
+
+Phải là ruleId RIÊNG, không dồn vào `deploy.undeclared-target`: nguyên nhân khác nhau thì hành động khác nhau, và message của `undeclared-target` sẽ chỉ người dùng sửa một file đang không được đọc.
+
+```
+✗ guardrail chặn: deploy.no-project-root
+
+  Vì sao: không tìm được .git từ cwd (/Users/haiduong), nên không đọc được
+          codex-guardrail.json — guardrail không biết dự án này được deploy đi đâu
+  Làm gì tiếp: mở Codex TỪ thư mục dự án rồi thử lại
+```
+
+Rule này chạy TRƯỚC `deploy.no-target` và `deploy.undeclared-target`: không biết dự án thì hai câu hỏi kia vô nghĩa.
+
+### 5.2 `deploy.no-target` — `PreToolUse: Bash`
+`deploy.no-target` — `PreToolUse: Bash`
 
 Lệnh khớp một `deploy.entrypoints` nhưng **không có tham số target nào**. Đây là rule trả lời trực tiếp §1: *chưa chỉ định = chặn.*
 
@@ -180,21 +247,15 @@ Lệnh khớp một `deploy.entrypoints` nhưng **không có tham số target n�
 
 Chỉ bật khi `requireExplicitTarget: true` (mặc định `true`).
 
-### 5.2 `deploy.undeclared-target` — `PreToolUse: Bash`
+### 5.3 `deploy.undeclared-target` — `PreToolUse: Bash`
+`deploy.undeclared-target` — `PreToolUse: Bash`
 
 Lệnh khớp entrypoint và **có** tham số, nhưng tham số đó không khớp `name` của bất kỳ target nào.
 
 Message phải **liệt kê các target đã khai**. Đó là thứ biến câu hỏi mở thành câu hỏi đóng, tức là phần giải quyết §1.
 
-### 5.3 `deploy.branch-mismatch` — `PreToolUse: Bash`
-
-Target khai hợp lệ, nhưng branch hiện tại không khớp `branches` của **chính target đó**. So bằng `globToRegExp` (đã có) nên `release/*` hoạt động.
-
-Chỉ có ĐÚNG MỘT target mỗi lệnh (§11.2 đã chốt: deploy tuần tự), nên không cần vòng lặp qua nhiều target.
-
-**Ràng buộc latency:** chỉ gọi `currentBranch()` khi lệnh ĐÃ khớp một entrypoint. Deploy là việc hiếm, còn hook chạy trên mọi tool call — spawn `git` trên đường allow là trả phí cho việc không xảy ra. Cùng nếp với `git.*` (Task 10: `currentBranch` chỉ gọi trên nhánh deny/escaped).
-
 ### 5.4 `deploy.ambiguous-target` — `PreToolUse: Bash`
+`deploy.ambiguous-target` — `PreToolUse: Bash`
 
 Lệnh khớp entrypoint và nêu **nhiều hơn một** target đã khai (`./deploy.sh staging prod`).
 
@@ -207,9 +268,19 @@ Lệnh khớp entrypoint và nêu **nhiều hơn một** target đã khai (`./de
   Làm gì tiếp: deploy tuần tự, mỗi lệnh một đích
 ```
 
-Không có target nào thì là `deploy.no-target` (§5.1); nhiều hơn một thì là mục này. Nghĩa là entrypoint chỉ chạy với **đúng một** target.
+Không có target nào thì là `deploy.no-target` (§5.2); nhiều hơn một thì là mục này. Nghĩa là entrypoint chỉ chạy với **đúng một** target.
 
-### 5.5 `deploy.direct-tool` — `PreToolUse: Bash`
+### 5.5 `deploy.branch-mismatch` — `PreToolUse: Bash`
+`deploy.branch-mismatch` — `PreToolUse: Bash`
+
+Target khai hợp lệ, nhưng branch hiện tại không khớp `branches` của **chính target đó**. So bằng `globToRegExp` (đã có) nên `release/*` hoạt động.
+
+Chỉ có ĐÚNG MỘT target mỗi lệnh (§11.2 đã chốt: deploy tuần tự), nên không cần vòng lặp qua nhiều target.
+
+**Ràng buộc latency:** chỉ gọi `currentBranch()` khi lệnh ĐÃ khớp một entrypoint. Deploy là việc hiếm, còn hook chạy trên mọi tool call — spawn `git` trên đường allow là trả phí cho việc không xảy ra. Cùng nếp với `git.*` (Task 10: `currentBranch` chỉ gọi trên nhánh deny/escaped).
+
+### 5.6 `deploy.direct-tool` — `PreToolUse: Bash`
+`deploy.direct-tool` — `PreToolUse: Bash`
 
 Lệnh dùng công cụ deploy trực tiếp thay vì đi qua entrypoint. Nhận diện **không theo tên binary cứng trong code** (§3.1) mà theo `deploy.denyDirect` — mảng regex do dự án khai, mặc định `[]` — cộng phần `infra.denyBinaries` đã chặn 9 công cụ ở §2.1.
 
@@ -219,7 +290,8 @@ Mười công cụ lọt ở §2.1 được xử bằng **dữ liệu policy** (
 
 **Thứ tự trong REGISTRY:** `deploy` chạy **trước** `infra`. Lý do: `vercel --prod` bị cả hai bắt, và ruleId được báo là ruleId người dùng sẽ gõ để escape. `deploy.direct-tool` nói "hãy dùng script", còn `infra.deny-binary` chỉ nói "binary bị chặn" — cái đầu hành động được, cái sau không.
 
-### 5.5b `deploy.undeclared-destination` — `PreToolUse: Bash` — quyết định `ask`
+### 5.7 `deploy.undeclared-destination` — `PreToolUse: Bash` — quyết định `ask`
+`deploy.undeclared-destination` — `PreToolUse: Bash` — quyết định `ask`
 
 Nhóm B (`scp`, `rsync`, `ssh`, `curl`) **không chặn** — dev dùng hằng ngày. Thay vào đó **hỏi** trước khi chạy.
 
@@ -248,7 +320,8 @@ Nhận diện chiều: với `scp`/`rsync`, tham số ĐÍCH (cuối) có dạng
 
 **Ở chế độ bỏ qua quyền, `ask` hạ về `deny`** (§3.9). Nghĩa là nhóm B chuyển từ "hỏi" sang "chặn" trong đúng những phiên mà prompt không có ai bấm — bao gồm phiên không người trực. Đây là ma sát thật, ghi ở §9.9.
 
-### 5.6 `deploy.target.<name>` — đích hệ quả cao đòi người xác nhận
+### 5.8 `deploy.target.<name>` — đích hệ quả cao đòi người xác nhận
+`deploy.target.<name>` — đích hệ quả cao đòi người xác nhận
 
 Đây là **cửa lùi** khi `ask` không dùng được (§3.9): ở chế độ bỏ qua quyền, prompt của Codex không đáng tin nên xác nhận phải đi qua kênh mà agent không với tới được.
 
@@ -266,9 +339,11 @@ ruleId phải chứa tên target, không dùng chung một `deploy.high-conseque
 
 Quyết định escaped vẫn được ghi audit (`decision: 'escaped'`), nên một lần deploy prod do người mở vẫn để lại vết.
 
-### 5.7 `deploy.script` — dự án tự khai, không phải rule của plugin
+### 5.9 `deploy.script` — dự án tự khai, không phải rule của plugin
+`deploy.script` — dự án tự khai, không phải rule của plugin
 
 Bảo vệ script bằng `selfProtect.protectedPaths` (§2.4). Plugin **không** ship nhóm này; `init` sinh nó vào file dự án.
+
 
 ---
 
@@ -357,7 +432,9 @@ Ngoài đường nóng, `doctor` resolve `name` của target trong `~/.ssh/confi
 
 8. **Nhóm B chuyển từ "hỏi" sang "chặn" trong phiên không người trực.** Hệ quả của §3.9: ở chế độ bỏ qua quyền hoặc phiên không có người, `scp`/`rsync`/`ssh`/`curl` đẩy dữ liệu tới host chưa khai sẽ bị CHẶN chứ không hỏi. Đúng hướng an toàn, nhưng nghĩa là một script CI dùng `rsync` tới host chưa khai sẽ vỡ — phải khai host đó, hoặc chạy ngoài Codex.
 
-9. **Thứ mạnh nhất không phải guardrail.** Nếu deploy token không nằm trên máy dev thì AI đoán gì cũng không deploy được. Deploy từ CI với protected environment. Guardrail không thay được điều đó, và tài liệu không được ngụ ý là thay được.
+9. **`deploy.*` vô hiệu hoàn toàn khi mở Codex ngoài thư mục dự án** (§2.7). Không phải "giảm bảo vệ" mà là "chặn tất cả": allow-list không có dữ liệu thì không có đích nào hợp lệ. Đó là hướng an toàn, nhưng nghĩa là thói quen mở Codex từ home làm nhóm này thành một bức tường thay vì một cổng — và team phải đổi thói quen, không phải guardrail nới ra.
+
+10. **Thứ mạnh nhất không phải guardrail.** Nếu deploy token không nằm trên máy dev thì AI đoán gì cũng không deploy được. Deploy từ CI với protected environment. Guardrail không thay được điều đó, và tài liệu không được ngụ ý là thay được.
 
 ---
 
@@ -368,7 +445,7 @@ Ngoài các nguyên tắc đã có (§14 spec chính), nhóm này bắt buộc:
 - **Cả hai chiều cho từng rule.** Đặc biệt `deploy.branch-mismatch`: phải có ca branch ĐÚNG được cho qua, không chỉ ca sai bị chặn.
 - **Tổ hợp sai không biểu diễn được** (§3.4): test rằng `branch=develop` + `target=prod` bị chặn, kể cả khi cả hai giá trị đều xuất hiện trong policy.
 - **Chưa khai `deploy` thì nhóm là no-op hoàn toàn** — không được chặn oan dự án chưa cấu hình.
-- **Đường allow không spawn `git`** (§5.3), kiểm qua test độ trễ: phần dôi của đường allow không được tăng.
+- **Đường allow không spawn `git`** (§5.5), kiểm qua test độ trễ: phần dôi của đường allow không được tăng.
 - **Nền tảng:** `./scripts/deploy.sh` và `scripts\deploy.sh` phải khớp cùng một entry. Team có dev Windows (§2.5), và `tokenize()` vừa phải sửa đúng lớp lỗi này ở `d0ccc88`.
 - **Mutation test** cho mỗi assert mới, theo nếp đã dùng cả Plan 1.
 
@@ -376,13 +453,13 @@ Ngoài các nguyên tắc đã có (§14 spec chính), nhóm này bắt buộc:
 
 ## 11. Ẩn số cần làm rõ trước khi code
 
-1. **Script nhận target qua tham số vị trí hay cờ?** `./deploy.sh prod` hay `./deploy.sh --env=prod`. Ảnh hưởng cách bóc target ở §5.2. Mỗi dự án một kiểu thì có thể cần khai thêm, ví dụ `targetArg: "positional" | "--env"`.
-2. ~~Có dự án nào deploy nhiều target trong một lệnh không?~~ **ĐÃ CHỐT 2026-08-28: deploy TUẦN TỰ, mỗi lệnh một đích.** Hệ quả: §5.3 không cần vòng lặp, và lệnh nhiều đích bị `deploy.ambiguous-target` chặn (§5.4).
+1. **Script nhận target qua tham số vị trí hay cờ?** `./deploy.sh prod` hay `./deploy.sh --env=prod`. Ảnh hưởng cách bóc target ở §5.3. Mỗi dự án một kiểu thì có thể cần khai thêm, ví dụ `targetArg: "positional" | "--env"`.
+2. ~~Có dự án nào deploy nhiều target trong một lệnh không?~~ **ĐÃ CHỐT 2026-08-28: deploy TUẦN TỰ, mỗi lệnh một đích.** Hệ quả: §5.5 không cần vòng lặp, và lệnh nhiều đích bị `deploy.ambiguous-target` chặn (§5.4).
 3. **Mười công cụ lọt ở §2.1 — cái nào team đang dùng hợp lệ?** Đã chốt một phần 2026-08-28:
 
    - `docker push`: **team không dùng bao giờ.** Bịt bằng `denyPatterns: ['docker\\s+push\\b']`, đã đo ở §2.6 — 4/4 chặn, 10/10 lệnh docker hằng ngày vẫn qua. Zero code.
    - **Nhóm A, đề xuất chặn cứng qua `denyBinaries`** (chờ bạn phủ quyết): `surge`, `gh-pages`, `netlify`, `firebase`, `railway`. Lý do coi là an toàn để chặn: chúng chỉ dùng để publish ra hosting công khai, không có công dụng local nào; và `surge`/`gh-pages` đúng là ca "domain free" ở §1.
-   - **Nhóm B — ĐÃ CHỐT 2026-08-28: KHÔNG chặn, mà HỎI.** `scp`, `rsync`, `ssh`, `curl`. Cơ chế ở §5.5b: chỉ hỏi khi đích chưa khai VÀ lệnh đẩy dữ liệu ra. Hai điều kiện đó giữ số prompt thấp, vì tải-về thường xuyên còn đẩy-lên hiếm.
+   - **Nhóm B — ĐÃ CHỐT 2026-08-28: KHÔNG chặn, mà HỎI.** `scp`, `rsync`, `ssh`, `curl`. Cơ chế ở §5.7: chỉ hỏi khi đích chưa khai VÀ lệnh đẩy dữ liệu ra. Hai điều kiện đó giữ số prompt thấp, vì tải-về thường xuyên còn đẩy-lên hiếm.
 
 
 4. **`ask` có thật sự hỏi ở chế độ mà máy dev đang chạy không?** ẨN SỐ CHẶN THIẾT KẾ, và mức nghiêm trọng đã TĂNG sau quyết định không chặn nhóm B: trước đây nó chỉ ảnh hưởng UX của confirm deploy; giờ nó quyết định nhóm B **có được bảo vệ hay không**. Nếu `ask` không hỏi và ta cũng không chặn, `scp`/`rsync`/`ssh`/`curl` tới host lạ là lỗ hoàn toàn hở. Mọi payload thật Task 0 bắt được đều ở chế độ đó. Cần một spike đúng kiểu Task 0: phát `permissionDecision: "ask"` từ hook, chạy lệnh thật trong Codex, xem có prompt hay tự chạy. Ba kết quả, ba thiết kế khác nhau:
