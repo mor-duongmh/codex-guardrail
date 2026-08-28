@@ -97,6 +97,12 @@ Ngân sách độ trễ hiện tại: hook p95 **27.8ms**, ngân sách §13 spec
 
 7. **Chưa khai `deploy` thì `doctor` phải nói ra.** Không thì một dự án được zero bảo vệ deploy mà không ai biết — đúng lỗi `deps.enabled: true` đã vá ở `f92156c`.
 
+8. **Càng nhiều đích, allow-list càng yếu — nên đích hệ quả cao phải đòi một hành động chỉ NGƯỜI làm được.** Một dự án deploy nhiều chỗ (đây là ca thực tế, không phải giả định) làm threat model dịch chuyển: từ *"AI chọn chỗ CHƯA khai"* sang *"AI chọn SAI chỗ ĐÃ khai"*. Allow-list không giải được cái sau — `prod` đã khai nên `./deploy.sh prod` qua, và nếu đang ở `release/1.2` thì branch check cũng qua. Với một đích, allow-list là đảm bảo thật; với năm đích, nó gần như chỉ còn là phép kiểm chính tả.
+
+   Cơ chế: mỗi target có ruleId riêng `deploy.target.<name>`, và target khai `requireHumanEscape: true` thì LUÔN bị chặn cho tới khi người gõ `CODEX_GUARDRAIL_ALLOW=deploy.target.prod` trong shell TRƯỚC khi mở Codex. Đo được: escape khớp chuỗi chính xác trên ruleId nên ruleId bất kỳ đều dùng được, và `deploy.*` KHÔNG phải wildcard nên không thể escape gộp cả nhóm.
+
+   Vì sao đây là kênh chỉ người dùng được: đo ở Task 9/10 — `export` bên trong một tool call KHÔNG lan tới tiến trình Codex, và `selfprotect.escape-inline` chặn agent viết biến đó vào command. Giới hạn của nó ở §9.7.
+
 ---
 
 ## 4. Phân vai — ai đảm bảo thông tin nào
@@ -157,7 +163,23 @@ Mười công cụ lọt ở §2.1 được xử bằng **dữ liệu policy** (
 
 **Thứ tự trong REGISTRY:** `deploy` chạy **trước** `infra`. Lý do: `vercel --prod` bị cả hai bắt, và ruleId được báo là ruleId người dùng sẽ gõ để escape. `deploy.direct-tool` nói "hãy dùng script", còn `infra.deny-binary` chỉ nói "binary bị chặn" — cái đầu hành động được, cái sau không.
 
-### 5.5 `deploy.script` — dự án tự khai, không phải rule của plugin
+### 5.5 `deploy.target.<name>` — đích hệ quả cao đòi người xác nhận
+
+Target khai `requireHumanEscape: true` thì bị chặn kể cả khi target đã khai VÀ branch khớp. Chỉ qua khi người đã đặt `CODEX_GUARDRAIL_ALLOW=deploy.target.<name>` trong shell trước khi mở Codex.
+
+```
+✗ guardrail chặn: deploy.target.prod
+
+  Vì sao: prod là đích hệ quả cao, cần người xác nhận chứ không để agent tự quyết
+  Làm gì tiếp: hỏi người dùng có thật sự muốn deploy prod. Nếu có, HỌ tự gõ
+    trong shell rồi mở lại Codex:  export CODEX_GUARDRAIL_ALLOW=deploy.target.prod
+```
+
+ruleId phải chứa tên target, không dùng chung một `deploy.high-consequence`: dùng chung thì một lần escape mở cho MỌI đích hệ quả cao, mà cả điểm của nó là mở đúng một đích.
+
+Quyết định escaped vẫn được ghi audit (`decision: 'escaped'`), nên một lần deploy prod do người mở vẫn để lại vết.
+
+### 5.6 `deploy.script` — dự án tự khai, không phải rule của plugin
 
 Bảo vệ script bằng `selfProtect.protectedPaths` (§2.4). Plugin **không** ship nhóm này; `init` sinh nó vào file dự án.
 
@@ -173,7 +195,8 @@ Bảo vệ script bằng `selfProtect.protectedPaths` (§2.4). Plugin **không**
     "denyDirect": [],
     "targets": [
       { "name": "staging", "branches": ["develop"] },
-      { "name": "prod",    "branches": ["release/*"] }
+      { "name": "demo",    "branches": ["develop", "main"] },
+      { "name": "prod",    "branches": ["release/*"], "requireHumanEscape": true }
     ]
   },
   "selfProtect": {
@@ -241,7 +264,9 @@ Ngoài đường nóng, `doctor` resolve `name` của target trong `~/.ssh/confi
 3. **Alias `~/.ssh/config` có thể bị repoint** và guardrail không biết (§3.5). `doctor` phát hiện được, nhưng chỉ khi có người chạy nó.
 4. **Không nở biến môi trường.** `./deploy.sh $TARGET` — guardrail thấy `$TARGET`, không thấy giá trị. Cùng giới hạn §15 #12 spec chính. Hệ quả cụ thể: dạng này bị `deploy.undeclared-target` chặn — lệch về phía chặn, đúng hướng, nhưng là ma sát thật cần ghi.
 5. **Deploy không hoàn tác được.** Với nhóm này, tầng 1 mỏng hơn các nhóm khác: dev tháo hook được, `python -c` lách được, và một URL public đã tồn tại thì có thể đã bị index. Sức nặng thật nằm ở tầng 2/3 và ở kiểm soát phía nhà cung cấp.
-6. **Thứ mạnh nhất không phải guardrail.** Nếu deploy token không nằm trên máy dev thì AI đoán gì cũng không deploy được. Deploy từ CI với protected environment. Guardrail không thay được điều đó, và tài liệu không được ngụ ý là thay được.
+6. **`requireHumanEscape` mạnh trong phiên, không airtight qua phiên.** Agent KHÔNG tự phát escape được trong phiên (đo ở Task 9/10), nhưng nó ghi được `export CODEX_GUARDRAIL_ALLOW=deploy.target.prod` vào `~/.zshrc` và **phiên Codex sau thừa hưởng** — cùng giới hạn §15 #3/#10 spec chính, và các file rc cố ý không nằm trong `selfProtect.protectedPaths`. Nên nó chặn được "agent tự cho phép mình ngay lúc này", không chặn được "agent cài sẵn rồi đợi".
+
+7. **Thứ mạnh nhất không phải guardrail.** Nếu deploy token không nằm trên máy dev thì AI đoán gì cũng không deploy được. Deploy từ CI với protected environment. Guardrail không thay được điều đó, và tài liệu không được ngụ ý là thay được.
 
 ---
 
