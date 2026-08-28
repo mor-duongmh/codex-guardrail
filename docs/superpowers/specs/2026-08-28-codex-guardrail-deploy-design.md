@@ -103,6 +103,16 @@ Ngân sách độ trễ hiện tại: hook p95 **27.8ms**, ngân sách §13 spec
 
    Vì sao đây là kênh chỉ người dùng được: đo ở Task 9/10 — `export` bên trong một tool call KHÔNG lan tới tiến trình Codex, và `selfprotect.escape-inline` chặn agent viết biến đó vào command. Giới hạn của nó ở §9.7.
 
+9. **Deploy thì HỎI người, không chặn thẳng — nhưng phải hạ về chặn khi không chắc có người trả lời.** Đây là thay đổi có ý thức đối với quyết định nền của spec chính (chặn cứng, không hỏi-duyệt). Lý do đổi chỉ áp cho nhóm này: **hỏi chỉ an toàn khi hành động HIẾM.** Deploy là việc hiếm và cố ý, nên một prompt là đúng chỗ. `cat .env` trong một vòng lặp thì không — hỏi ở đó sinh prompt fatigue, người bấm qua theo phản xạ, và "hỏi" biến thành "cho qua" về mặt hành vi. Vì vậy nhóm `deploy` dùng `ask`, các nhóm khác giữ nguyên chặn cứng.
+
+   Đo được: `ask` là giá trị hợp lệ của `permissionDecision` trong Codex 0.150.1 (`PreToolUsePermissionDecisionWire` có `ask`; `PreToolUseDecisionWire` có `approve|block|allow|deny`).
+
+   **NHƯNG:** mọi payload thật Task 0 bắt được đều có `"permission_mode": "bypassPermissions"`, và `lib/` hiện KHÔNG đọc trường đó. Nếu ở chế độ đó Codex tự duyệt `ask`, thì confirm âm thầm thành cho-qua — đúng lớp lỗi "trông như được bảo vệ mà không". Nên bắt buộc:
+
+   - `buildContext` phải đọc `permission_mode` vào ctx.
+   - Nhóm `deploy` chỉ phát `ask` khi mode KHÔNG phải chế độ bỏ qua quyền. Ở chế độ bỏ qua quyền, `ask` **hạ về `deny`** và dùng `requireHumanEscape` (§5.6) làm cửa duy nhất.
+   - Chưa đo được hành vi thật của `ask` dưới `bypassPermissions` thì thiết kế phải GIẢ ĐỊNH nó không hỏi. Xem §11.4.
+
 ---
 
 ## 4. Phân vai — ai đảm bảo thông tin nào
@@ -181,6 +191,8 @@ Mười công cụ lọt ở §2.1 được xử bằng **dữ liệu policy** (
 **Thứ tự trong REGISTRY:** `deploy` chạy **trước** `infra`. Lý do: `vercel --prod` bị cả hai bắt, và ruleId được báo là ruleId người dùng sẽ gõ để escape. `deploy.direct-tool` nói "hãy dùng script", còn `infra.deny-binary` chỉ nói "binary bị chặn" — cái đầu hành động được, cái sau không.
 
 ### 5.6 `deploy.target.<name>` — đích hệ quả cao đòi người xác nhận
+
+Đây là **cửa lùi** khi `ask` không dùng được (§3.9): ở chế độ bỏ qua quyền, prompt của Codex không đáng tin nên xác nhận phải đi qua kênh mà agent không với tới được.
 
 Target khai `requireHumanEscape: true` thì bị chặn kể cả khi target đã khai VÀ branch khớp. Chỉ qua khi người đã đặt `CODEX_GUARDRAIL_ALLOW=deploy.target.<name>` trong shell trước khi mở Codex.
 
@@ -283,7 +295,9 @@ Ngoài đường nóng, `doctor` resolve `name` của target trong `~/.ssh/confi
 5. **Deploy không hoàn tác được.** Với nhóm này, tầng 1 mỏng hơn các nhóm khác: dev tháo hook được, `python -c` lách được, và một URL public đã tồn tại thì có thể đã bị index. Sức nặng thật nằm ở tầng 2/3 và ở kiểm soát phía nhà cung cấp.
 6. **`requireHumanEscape` mạnh trong phiên, không airtight qua phiên.** Agent KHÔNG tự phát escape được trong phiên (đo ở Task 9/10), nhưng nó ghi được `export CODEX_GUARDRAIL_ALLOW=deploy.target.prod` vào `~/.zshrc` và **phiên Codex sau thừa hưởng** — cùng giới hạn §15 #3/#10 spec chính, và các file rc cố ý không nằm trong `selfProtect.protectedPaths`. Nên nó chặn được "agent tự cho phép mình ngay lúc này", không chặn được "agent cài sẵn rồi đợi".
 
-7. **Thứ mạnh nhất không phải guardrail.** Nếu deploy token không nằm trên máy dev thì AI đoán gì cũng không deploy được. Deploy từ CI với protected environment. Guardrail không thay được điều đó, và tài liệu không được ngụ ý là thay được.
+7. **`ask` chỉ đáng tin khi có người thật trả lời.** Nếu phiên chạy ở chế độ bỏ qua quyền, hoặc chạy không người trực (cron, CI, agent nền), thì prompt không có ai bấm. Guardrail hạ về `deny` trong trường hợp đó (§3.9), nghĩa là **deploy không chạy được trong phiên không người trực** — đó là hành vi đúng cho một hành động không hoàn tác được, nhưng phải nói ra vì nó là ma sát thật.
+
+8. **Thứ mạnh nhất không phải guardrail.** Nếu deploy token không nằm trên máy dev thì AI đoán gì cũng không deploy được. Deploy từ CI với protected environment. Guardrail không thay được điều đó, và tài liệu không được ngụ ý là thay được.
 
 ---
 
@@ -305,3 +319,12 @@ Ngoài các nguyên tắc đã có (§14 spec chính), nhóm này bắt buộc:
 1. **Script nhận target qua tham số vị trí hay cờ?** `./deploy.sh prod` hay `./deploy.sh --env=prod`. Ảnh hưởng cách bóc target ở §5.2. Mỗi dự án một kiểu thì có thể cần khai thêm, ví dụ `targetArg: "positional" | "--env"`.
 2. ~~Có dự án nào deploy nhiều target trong một lệnh không?~~ **ĐÃ CHỐT 2026-08-28: deploy TUẦN TỰ, mỗi lệnh một đích.** Hệ quả: §5.3 không cần vòng lặp, và lệnh nhiều đích bị `deploy.ambiguous-target` chặn (§5.4).
 3. **Mười công cụ lọt ở §2.1 có cái nào team đang dùng hợp lệ không?** Thêm vào `infra.denyBinaries` là chặn cứng; nếu `docker push` đang dùng cho registry nội bộ thì cần cửa thoát theo subcommand — vốn đã là mục nợ Plan 2.
+
+4. **`ask` có thật sự hỏi dưới `permission_mode: "bypassPermissions"` không?** ẨN SỐ CHẶN THIẾT KẾ. Mọi payload thật Task 0 bắt được đều ở chế độ đó. Cần một spike đúng kiểu Task 0: phát `permissionDecision: "ask"` từ hook, chạy lệnh thật trong Codex, xem có prompt hay tự chạy. Ba kết quả, ba thiết kế khác nhau:
+   - Có hỏi → `ask` là cơ chế chính, `requireHumanEscape` chỉ còn cho phiên không người trực.
+   - Tự duyệt → `ask` VÔ DỤNG ở chế độ này; `requireHumanEscape` là cơ chế duy nhất, và phải ghi vào README rằng confirm không khả dụng khi chạy bypassPermissions.
+   - Coi là hook lỗi → tuyệt đối không dùng `ask`, vì theo Task 0 hook lỗi = CHO LỆNH CHẠY.
+
+   Cho tới khi đo, thiết kế giả định kết quả xấu nhất.
+
+5. **Tên chính xác của các chế độ `permission_mode`.** Chỉ thấy `bypassPermissions` trong payload thật. Cần biết đủ tập giá trị để phân biệt "chế độ có hỏi" với "chế độ bỏ qua" — hardcode một chuỗi rồi đoán phần còn lại là cách sinh ra lỗ im lặng.
