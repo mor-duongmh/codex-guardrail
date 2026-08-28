@@ -142,3 +142,52 @@ test('matchEntry khớp tiền tố nhiều token, không chỉ argv[0]', () => 
   // và không khớp một script khác cùng thư mục
   assert.equal(matchEntry(['scripts/seed.sh'], ['./scripts/deploy.sh']), null);
 });
+
+// --- deploy.no-project-root + detectScripts (Task 4) -------------------------
+// Khi projectRoot là null thì loadPolicy(null) CHỈ trả policy mặc định, nên
+// deploy.entrypoints luôn rỗng — cò súng cũng mất. Vì thế cò súng của rule này
+// phải nằm ở policy MẶC ĐỊNH, không phải policy dự án.
+
+const rootless = (command) => ({ ...shell(command), cwd: '/Users/me', projectRoot: null });
+
+test('không có project root: lệnh trông-như-deploy bị chặn, kèm nguyên nhân thật', () => {
+  for (const cmd of ['./scripts/deploy.sh prod', 'bash scripts/deploy.sh', './deploy-prod.sh',
+                     'pwsh ./deploy.ps1', './scripts/publish.sh',
+                     'sudo bash ./scripts/deploy.sh prod']) {
+    const r = evaluate(rootless(cmd), P0);
+    assert.equal(r.ruleId, 'deploy.no-project-root', cmd);
+    assert.match(r.reason, /Users\/me/, cmd);        // phải nói cwd thật
+    assert.match(r.hint, /TỪ thư mục dự án/, cmd);
+    assert.ok(!/[.\n]$/.test(r.reason), 'reason không kết thúc bằng dấu chấm');
+  }
+});
+
+test('detectScripts chỉ khớp khi script ĐANG được thi hành', () => {
+  for (const cmd of ['cat scripts/deploy.sh', 'vim deploy.sh', 'git diff scripts/deploy.sh',
+                     'grep -rn deploy scripts/', 'chmod +x scripts/deploy.sh',
+                     'ls scripts/deploy.sh', 'git add scripts/deploy.sh',
+                     'cp scripts/deploy.sh /tmp/', 'head -20 deploy.sh', 'echo ./deploy.sh',
+                     'npm test', 'git status', 'node --test tests/']) {
+    assert.equal(evaluate(rootless(cmd), P0).decision, 'allow', cmd);
+  }
+});
+
+test('có project root thì detectScripts KHÔNG chặn — entrypoint mới là cò súng', () => {
+  // Dự án có script tên deploy.sh nhưng cố ý không khai nó là entrypoint: đó là
+  // quyền của dự án, và detectScripts không được lấn.
+  assert.equal(evaluate(shell('./scripts/deploy.sh prod'), P0).decision, 'allow');
+});
+
+test('no-project-root chạy TRƯỚC no-target', () => {
+  // Ca giả lập: policy CÓ entrypoint nhưng thiếu root. Thực tế không xảy ra (mất
+  // root là mất policy), nhưng nếu thứ tự sai thì message sẽ chỉ người dùng sửa
+  // một file đang không được đọc.
+  assert.equal(evaluate(rootless('./scripts/deploy.sh'), withDeploy()).ruleId,
+    'deploy.no-project-root');
+});
+
+test('detectScripts rỗng thì không chặn gì', () => {
+  const p = mergePolicy(P0, {});
+  p.deploy = { ...p.deploy, detectScripts: [] };
+  assert.equal(evaluate(rootless('./scripts/deploy.sh prod'), p).decision, 'allow');
+});

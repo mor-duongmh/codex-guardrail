@@ -666,7 +666,7 @@ Task này sửa một lỗ trong chính spec, phát hiện khi lập plan: `depl
 - Consumes: `globToRegExp`, `matchesAny` từ `lib/glob.mjs`; `ctx.projectRoot`
 - Produces: không thêm export mới
 
-- [ ] **Step 1: Viết test đỏ**
+- [x] **Step 1: Viết test đỏ**
 
 ```js
 const rootless = (command) => ({ ...shell(command), cwd: '/Users/me', projectRoot: null });
@@ -705,12 +705,12 @@ test('no-project-root chạy TRƯỚC no-target', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy để thấy đỏ**
+- [x] **Step 2: Chạy để thấy đỏ**
 
 Run: `node --test tests/rules/deploy.test.mjs`
 Expected: FAIL — `decision` là `allow`, không phải `deny`
 
-- [ ] **Step 3: Thêm `detectScripts` vào `policy/default.json`**
+- [x] **Step 3: Thêm `detectScripts` vào `policy/default.json`**
 
 Vào khối `deploy`:
 
@@ -723,7 +723,7 @@ Mảng này **có dữ liệu ở bản mặc định**, khác ba mảng kia, v�
 
 Hai dạng glob (`**/deploy*.sh` và `deploy*.sh`) vì `**/` của `globToRegExp` sinh `(?:.*/)?` — kiểm bằng test, không suy đoán: nếu một dạng đã phủ cả hai thì bỏ dạng kia.
 
-- [ ] **Step 4: Cài rule**
+- [x] **Step 4: Cài rule**
 
 Trong `lib/rules/deploy.mjs`, sửa import:
 
@@ -764,12 +764,12 @@ Trong `evaluate`, **trước** khối `if (entries.length === 0) return ALLOW;`:
   }
 ```
 
-- [ ] **Step 5: Chạy test**
+- [x] **Step 5: Chạy test**
 
 Run: `node --test tests/rules/deploy.test.mjs`
 Expected: PASS (13 test)
 
-- [ ] **Step 6: Đo lại chặn oan trên tập rộng hơn**
+- [x] **Step 6: Đo lại chặn oan trên tập rộng hơn**
 
 Run:
 
@@ -779,11 +779,11 @@ node --input-type=module -e "import {runHook} from './lib/dispatch.mjs'; const p
 
 Expected: `allow` cho cả 8.
 
-- [ ] **Step 7: Mutation test**
+- [x] **Step 7: Mutation test**
 
 Đổi `looksLikeDeployScript` để soi mọi token (`argv.some(...)` thay vì `argv[0]`). Expected: test `detectScripts chỉ khớp khi script ĐANG được thi hành` đỏ ở nhiều ca. Hoàn nguyên.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add lib/rules/deploy.mjs policy/default.json tests/rules/deploy.test.mjs && git commit -m "feat(deploy): chặn deploy khi không đọc được policy dự án, cò súng ở bản mặc định"

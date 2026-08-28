@@ -56,7 +56,8 @@
     "entrypoints": [],
     "requireExplicitTarget": true,
     "denyDirect": [],
-    "targets": []
+    "targets": [],
+    "detectScripts": ["**/deploy*.sh", "**/deploy*.ps1", "**/publish*.sh"]
   },
   "selfProtect": {
     "protectedPaths": {
