@@ -151,9 +151,26 @@ Message phải **liệt kê các target đã khai**. Đó là thứ biến câu 
 
 Target khai hợp lệ, nhưng branch hiện tại không khớp `branches` của **chính target đó**. So bằng `globToRegExp` (đã có) nên `release/*` hoạt động.
 
+Chỉ có ĐÚNG MỘT target mỗi lệnh (§11.2 đã chốt: deploy tuần tự), nên không cần vòng lặp qua nhiều target.
+
 **Ràng buộc latency:** chỉ gọi `currentBranch()` khi lệnh ĐÃ khớp một entrypoint. Deploy là việc hiếm, còn hook chạy trên mọi tool call — spawn `git` trên đường allow là trả phí cho việc không xảy ra. Cùng nếp với `git.*` (Task 10: `currentBranch` chỉ gọi trên nhánh deny/escaped).
 
-### 5.4 `deploy.direct-tool` — `PreToolUse: Bash`
+### 5.4 `deploy.ambiguous-target` — `PreToolUse: Bash`
+
+Lệnh khớp entrypoint và nêu **nhiều hơn một** target đã khai (`./deploy.sh staging prod`).
+
+Đây KHÔNG phải mục trang trí. Nếu cho qua rồi lấy target đầu tiên, guardrail sẽ áp `branches` của `staging` trong khi script deploy cả `prod` — tức một đường lách thật. Và vì deploy là tuần tự (§11.2), lệnh nhiều đích nằm ngoài cách dùng đã khai.
+
+```
+✗ guardrail chặn: deploy.ambiguous-target
+
+  Vì sao: lệnh nêu 2 đích (staging, prod) — không xác định được branch rule nào áp
+  Làm gì tiếp: deploy tuần tự, mỗi lệnh một đích
+```
+
+Không có target nào thì là `deploy.no-target` (§5.1); nhiều hơn một thì là mục này. Nghĩa là entrypoint chỉ chạy với **đúng một** target.
+
+### 5.5 `deploy.direct-tool` — `PreToolUse: Bash`
 
 Lệnh dùng công cụ deploy trực tiếp thay vì đi qua entrypoint. Nhận diện **không theo tên binary cứng trong code** (§3.1) mà theo `deploy.denyDirect` — mảng regex do dự án khai, mặc định `[]` — cộng phần `infra.denyBinaries` đã chặn 9 công cụ ở §2.1.
 
@@ -163,7 +180,7 @@ Mười công cụ lọt ở §2.1 được xử bằng **dữ liệu policy** (
 
 **Thứ tự trong REGISTRY:** `deploy` chạy **trước** `infra`. Lý do: `vercel --prod` bị cả hai bắt, và ruleId được báo là ruleId người dùng sẽ gõ để escape. `deploy.direct-tool` nói "hãy dùng script", còn `infra.deny-binary` chỉ nói "binary bị chặn" — cái đầu hành động được, cái sau không.
 
-### 5.5 `deploy.target.<name>` — đích hệ quả cao đòi người xác nhận
+### 5.6 `deploy.target.<name>` — đích hệ quả cao đòi người xác nhận
 
 Target khai `requireHumanEscape: true` thì bị chặn kể cả khi target đã khai VÀ branch khớp. Chỉ qua khi người đã đặt `CODEX_GUARDRAIL_ALLOW=deploy.target.<name>` trong shell trước khi mở Codex.
 
@@ -179,7 +196,7 @@ ruleId phải chứa tên target, không dùng chung một `deploy.high-conseque
 
 Quyết định escaped vẫn được ghi audit (`decision: 'escaped'`), nên một lần deploy prod do người mở vẫn để lại vết.
 
-### 5.6 `deploy.script` — dự án tự khai, không phải rule của plugin
+### 5.7 `deploy.script` — dự án tự khai, không phải rule của plugin
 
 Bảo vệ script bằng `selfProtect.protectedPaths` (§2.4). Plugin **không** ship nhóm này; `init` sinh nó vào file dự án.
 
@@ -286,5 +303,5 @@ Ngoài các nguyên tắc đã có (§14 spec chính), nhóm này bắt buộc:
 ## 11. Ẩn số cần làm rõ trước khi code
 
 1. **Script nhận target qua tham số vị trí hay cờ?** `./deploy.sh prod` hay `./deploy.sh --env=prod`. Ảnh hưởng cách bóc target ở §5.2. Mỗi dự án một kiểu thì có thể cần khai thêm, ví dụ `targetArg: "positional" | "--env"`.
-2. **Có dự án nào deploy nhiều target trong một lệnh không?** (`./deploy.sh staging prod`). Nếu có thì §5.3 phải kiểm branch cho từng target.
+2. ~~Có dự án nào deploy nhiều target trong một lệnh không?~~ **ĐÃ CHỐT 2026-08-28: deploy TUẦN TỰ, mỗi lệnh một đích.** Hệ quả: §5.3 không cần vòng lặp, và lệnh nhiều đích bị `deploy.ambiguous-target` chặn (§5.4).
 3. **Mười công cụ lọt ở §2.1 có cái nào team đang dùng hợp lệ không?** Thêm vào `infra.denyBinaries` là chặn cứng; nếu `docker push` đang dùng cho registry nội bộ thì cần cửa thoát theo subcommand — vốn đã là mục nợ Plan 2.
