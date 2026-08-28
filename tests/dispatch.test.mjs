@@ -254,3 +254,35 @@ test('dispatch ghi permissionMode vào audit log', async () => {
     else process.env.GUARDRAIL_AUDIT_PATH = prev;
   }
 });
+
+// Chẩn đoán §11.7: trong phiên Codex THẬT, repo và branch đều null dù người dùng
+// chạy Codex TỪ thư mục dự án (có .git). findProjectRoot đã được kiểm là đúng —
+// từ thư mục dự án và thư mục con đều tìm ra root, từ ~ thì trả null.
+//
+// Nên còn hai khả năng, và ghi `cwd` vào log phân biệt được ngay:
+//   cwd KHÔNG phải thư mục dự án -> vấn đề ở giá trị Codex gửi
+//   cwd ĐÚNG mà repo vẫn null    -> .git không đọc được từ tiến trình hook
+//                                    (Codex doctor báo "sandbox restricted fs")
+//
+// Hệ quả của null không nhỏ: loadPolicy(null) chỉ trả policy MẶC ĐỊNH, tức
+// codex-guardrail.json của dự án không bao giờ được đọc, và toàn bộ cơ chế nới
+// policy qua PR có CODEOWNERS là vô hiệu.
+test('dispatch ghi cwd vào audit log để chẩn đoán projectRoot=null', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'guardrail-disp-cwd-'));
+  const auditPath = join(dir, 'audit.jsonl');
+  const ev = JSON.stringify({
+    hook_event_name: 'PreToolUse', tool_name: 'Bash',
+    tool_input: { command: 'psql -l' }, cwd: '/some/where/else',
+  });
+  const prev = process.env.GUARDRAIL_AUDIT_PATH;
+  process.env.GUARDRAIL_AUDIT_PATH = auditPath;
+  try {
+    runHook(ev, { env: {} });
+    const e = JSON.parse(readFileSync(auditPath, 'utf8').trim().split('\n').at(-1));
+    assert.equal(e.cwd, '/some/where/else', 'không ghi cwd — mất khả năng chẩn đoán');
+    assert.equal(e.repo, null, 'cwd ngoài repo thì repo phải null');
+  } finally {
+    if (prev === undefined) delete process.env.GUARDRAIL_AUDIT_PATH;
+    else process.env.GUARDRAIL_AUDIT_PATH = prev;
+  }
+});
