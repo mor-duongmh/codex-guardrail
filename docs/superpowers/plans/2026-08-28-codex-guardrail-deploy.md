@@ -71,7 +71,7 @@ Vá một lỗ **có sẵn** phát hiện khi lập plan, không phải việc r
 - Consumes: `basename` từ `lib/tokenize.mjs` (đã có)
 - Produces: `SHELL_WRAPPERS: Set<string>` export từ `lib/tokenize.mjs`; `effectiveArgv(rawArgv: string[]) => string[]` giữ nguyên chữ ký
 
-- [ ] **Step 1: Viết test đỏ**
+- [x] **Step 1: Viết test đỏ**
 
 Tạo `tests/argv.test.mjs`:
 
@@ -109,12 +109,12 @@ test('không bóc khi shell không chạy script', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy để thấy đỏ**
+- [x] **Step 2: Chạy để thấy đỏ**
 
 Run: `node --test tests/argv.test.mjs`
 Expected: FAIL — `bash scripts/deploy.sh prod` trả `['bash','scripts/deploy.sh','prod']`
 
-- [ ] **Step 3: Export `SHELL_WRAPPERS` và mở rộng nó**
+- [x] **Step 3: Export `SHELL_WRAPPERS` và mở rộng nó**
 
 Trong `lib/tokenize.mjs`, dòng 6:
 
@@ -128,7 +128,7 @@ export const SHELL_WRAPPERS = new Set([
 ]);
 ```
 
-- [ ] **Step 4: Dùng nó trong `argv.mjs`**
+- [x] **Step 4: Dùng nó trong `argv.mjs`**
 
 Dòng 7:
 
@@ -157,17 +157,17 @@ const WRAPPERS = new Set([
 ]);
 ```
 
-- [ ] **Step 5: Chạy test của task**
+- [x] **Step 5: Chạy test của task**
 
 Run: `node --test tests/argv.test.mjs`
 Expected: PASS
 
-- [ ] **Step 6: Chạy TOÀN BỘ suite — bắt buộc, task này chạm 4 nhóm rule**
+- [x] **Step 6: Chạy TOÀN BỘ suite — bắt buộc, task này chạm 4 nhóm rule**
 
 Run: `node --test tests/`
 Expected: `# pass 411 # fail 0` (409 cũ + 2 test mới). Đã đo trước khi viết plan: bản vá này giữ 409/409 xanh.
 
-- [ ] **Step 7: Kiểm không chặn oan**
+- [x] **Step 7: Kiểm không chặn oan**
 
 Run:
 
@@ -177,11 +177,11 @@ node --input-type=module -e "import {evaluate} from './lib/rules/infra.mjs'; imp
 
 Expected: `allow` cho cả 7. Và `bash -c "psql -l"` vẫn `deny`.
 
-- [ ] **Step 8: Mutation test**
+- [x] **Step 8: Mutation test**
 
 Bỏ `'source', '.'` khỏi `WRAPPERS`. Expected: test `bóc trình thông dịch shell` đỏ ở 2 ca. Hoàn nguyên.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add lib/tokenize.mjs lib/argv.mjs tests/argv.test.mjs && git commit -m "fix(argv): bóc trình thông dịch shell, vá lỗ bash ./script.sh đi vòng mọi rule"
