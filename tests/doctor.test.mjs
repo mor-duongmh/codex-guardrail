@@ -512,3 +512,54 @@ test('codex chạy được thì báo ✓ và không hạ ok', () => {
   assert.equal(res.ok, true, `ok=false, output:\n${res.lines.join('\n')}`);
   assert.ok(res.lines.join('\n').includes('✓ Codex CLI: '));
 });
+
+// doctor chạy với cwd của CHÍNH NÓ, nên nó luôn tìm ra project root và báo
+// `✓ Policy: .../codex-guardrail.json` — trong khi hook thật có thể đang chạy với
+// projectRoot=null và chỉ dùng policy mặc định. Đo được trên máy thật: entry
+// `{"repo":null,"branch":null,...}` từ phiên Codex của người dùng dù họ chạy Codex
+// TỪ thư mục dự án.
+//
+// Hệ quả: mọi thứ team nới qua PR (infra.allowBinaries, selfProtect.protectedPaths,
+// deploy.targets) đều vô hiệu, và tầng 3 CODEOWNERS không làm gì cả — mà doctor
+// vẫn xanh. Nên doctor phải nói về THẾ GIỚI THẬT, đọc từ audit log, chứ không chỉ
+// về thế giới của chính nó.
+function writeAudit(home, entries) {
+  const p = join(home, 'audit.jsonl');
+  writeFileSync(p, entries.map(e => JSON.stringify(e)).join('\n') + '\n');
+  process.env.GUARDRAIL_AUDIT_PATH = p;
+}
+
+test('doctor báo ✗ khi hook thật chạy mà không tìm được project root', () => {
+  const home = healthy();
+  const { installedAt } = JSON.parse(readFileSync(join(home, '.guardrail-installed.json'), 'utf8'));
+  writeAudit(home, [
+    { ts: installedAt, decision: 'denied', ruleId: 'infra.deny-binary', repo: null, branch: null, cwd: '/private/tmp' },
+  ]);
+  const res = diagnose(repo());
+  const out = res.lines.join('\n');
+  assert.equal(res.ok, false, 'policy dự án không được áp dụng là lỗi, phải hạ ok');
+  assert.ok(out.includes('policy của dự án KHÔNG được đọc'), out);
+  assert.ok(out.includes('/private/tmp'), 'phải in cwd thật để người dùng đối chiếu');
+});
+
+test('doctor báo ✓ khi hook thật tìm được project root', () => {
+  const home = healthy();
+  const { installedAt } = JSON.parse(readFileSync(join(home, '.guardrail-installed.json'), 'utf8'));
+  writeAudit(home, [
+    { ts: installedAt, decision: 'denied', ruleId: 'infra.deny-binary', repo: 'demo', branch: 'main', cwd: '/x/demo' },
+  ]);
+  const res = diagnose(repo());
+  assert.equal(res.ok, true, `ok=false, output:\n${res.lines.join('\n')}`);
+  assert.ok(!res.lines.join('\n').includes('KHÔNG được đọc'));
+});
+
+// Entry CŨ HƠN lần cài không được kể: một lỗ đã vá rồi mà doctor vẫn đỏ mãi thì
+// người dùng học cách bỏ qua doctor.
+test('doctor bỏ qua entry cũ hơn lần cài hiện tại', () => {
+  const home = healthy();
+  writeAudit(home, [
+    { ts: '2020-01-01T00:00:00.000Z', decision: 'denied', ruleId: 'x', repo: null, branch: null, cwd: '/old' },
+  ]);
+  const res = diagnose(repo());
+  assert.equal(res.ok, true, `entry cũ không được hạ ok:\n${res.lines.join('\n')}`);
+});
