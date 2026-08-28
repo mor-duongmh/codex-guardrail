@@ -52,6 +52,12 @@
     ]
   },
   "deps": { "enabled": true },
+  "deploy": {
+    "entrypoints": [],
+    "requireExplicitTarget": true,
+    "denyDirect": [],
+    "targets": []
+  },
   "selfProtect": {
     "protectedPaths": {
       "selfprotect.policy-file": ["**/codex-guardrail.json"],

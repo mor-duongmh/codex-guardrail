@@ -387,7 +387,7 @@ Ba rule cốt lõi trả lời trực tiếp §1. Task này cũng nối module v
 - Consumes: `parseCommand`, `tokenize` từ `lib/tokenize.mjs`; `effectiveArgv` từ `lib/argv.mjs`; `normalizePath` từ `lib/glob.mjs`; `ALLOW`, `deny` từ `lib/result.mjs`
 - Produces: `evaluate(ctx, policy)`; nội bộ `matchEntry(argv, entries)`, `targetsIn(rest, names)`, `normToken(t)`
 
-- [ ] **Step 1: Viết test đỏ**
+- [x] **Step 1: Viết test đỏ**
 
 Tạo `tests/rules/deploy.test.mjs`:
 
@@ -483,12 +483,12 @@ test('biến môi trường không nở ra: lệch về phía chặn', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy để thấy đỏ**
+- [x] **Step 2: Chạy để thấy đỏ**
 
 Run: `node --test tests/rules/deploy.test.mjs`
 Expected: FAIL — `Cannot find module '../../lib/rules/deploy.mjs'`
 
-- [ ] **Step 3: Thêm khung `deploy` rỗng vào `policy/default.json`**
+- [x] **Step 3: Thêm khung `deploy` rỗng vào `policy/default.json`**
 
 ```json
   "deploy": {
@@ -501,7 +501,7 @@ Expected: FAIL — `Cannot find module '../../lib/rules/deploy.mjs'`
 
 Ba mảng này phải **mãi mãi rỗng**: `mergePolicy` HỢP mảng chứ không thay, nên một mục ở đây là một mục không dự án nào xoá được. `requireExplicitTarget` là boolean nên thay được — đó là lý do nó là boolean.
 
-- [ ] **Step 4: Viết `lib/rules/deploy.mjs`**
+- [x] **Step 4: Viết `lib/rules/deploy.mjs`**
 
 ```js
 // lib/rules/deploy.mjs
@@ -613,7 +613,7 @@ export function evaluate(ctx, policy) {
 }
 ```
 
-- [ ] **Step 5: Đăng ký vào dispatch**
+- [x] **Step 5: Đăng ký vào dispatch**
 
 `lib/dispatch.mjs` — import, `SAFETY_GROUPS`, và REGISTRY:
 
@@ -627,17 +627,17 @@ Trong `REGISTRY.PreToolUse.Bash`, chèn `['deploy', deploy]` **giữa** `secrets
 
 `apply_patch` **không** thêm `deploy`: nhóm này soi lệnh sẽ chạy, còn `ctx.command` là null với `apply_patch` (context.mjs:116) nên nó sẽ trả ALLOW ngay. Thêm vào chỉ tốn một lần gọi hàm trên đường nóng.
 
-- [ ] **Step 6: Chạy test**
+- [x] **Step 6: Chạy test**
 
 Run: `node --test tests/rules/deploy.test.mjs`
 Expected: PASS (9 test)
 
-- [ ] **Step 7: Chạy toàn bộ**
+- [x] **Step 7: Chạy toàn bộ**
 
 Run: `node --test tests/`
 Expected: 415 + 9 = 424 pass, 0 fail. Đặc biệt xác nhận `tests/latency.test.mjs` không đỏ.
 
-- [ ] **Step 8: Mutation test**
+- [x] **Step 8: Mutation test**
 
 1. Đổi `if (found.length > 1)` thành `>= 1`. Expected: test `bóc đích không phụ thuộc vị trí hay cờ` đỏ.
 2. Trong `targetsIn`, đổi `names.has(tok)` thành `[...names].some(n => tok.includes(n))`. Expected: test `token chỉ CHỨA tên đích` đỏ.
@@ -645,7 +645,7 @@ Expected: 415 + 9 = 424 pass, 0 fail. Đặc biệt xác nhận `tests/latency.t
 
 Hoàn nguyên cả ba.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add lib/rules/deploy.mjs policy/default.json lib/dispatch.mjs tests/rules/deploy.test.mjs && git commit -m "feat(deploy): chặn deploy không nêu đích, đích lạ, và đích mơ hồ"
