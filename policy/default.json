@@ -62,7 +62,8 @@
     "requireExplicitTarget": true,
     "denyDirect": [],
     "targets": [],
-    "detectScripts": ["**/deploy*.sh", "**/deploy*.ps1", "**/publish*.sh"]
+    "detectScripts": ["**/deploy*.sh", "**/deploy*.ps1", "**/publish*.sh"],
+    "declaredHosts": []
   },
   "selfProtect": {
     "protectedPaths": {

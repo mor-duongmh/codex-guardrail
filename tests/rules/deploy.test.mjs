@@ -331,3 +331,90 @@ test('denyDirect khớp chuỗi thô, không chuẩn hoá ./ như entrypoint', (
     'deploy.direct-tool',
     'denyDirect thắng entrypoint: dự án đã tuyên bố nó không được gọi trực tiếp');
 });
+
+// --- deploy.undeclared-destination (Task 7) ---------------------------------
+// Nhóm B (scp/rsync/ssh/curl) KHÔNG chặn — dev dùng hằng ngày. Điều kiện hỏi
+// phải hẹp theo HAI tín hiệu: đích chưa khai VÀ lệnh đẩy dữ liệu ra.
+
+const withHosts = (extra = {}) => mergePolicy(P0, {
+  deploy: {
+    entrypoints: ['./scripts/deploy.sh'],
+    targets: [{ name: 'staging' }],
+    declaredHosts: ['staging.acme.internal', '*.prod.acme.internal'],
+    ...extra,
+  },
+});
+
+test('lệnh ĐẨY tới host chưa khai thì hỏi', () => {
+  const p = withHosts();
+  for (const cmd of ['scp ./dist deploy@1.2.3.4:/var/www',
+                     'rsync -avz ./dist deploy@1.2.3.4:/var/www',
+                     'ssh deploy@1.2.3.4 "./deploy.sh"',
+                     'curl -X POST https://unknown.example --data-binary @dist.zip',
+                     'curl -T dist.zip https://unknown.example',
+                     'curl -F file=@dist.zip https://unknown.example',
+                     'curl --request PUT https://unknown.example -d @x']) {
+    const r = evaluate(shell(cmd), p);
+    assert.equal(r.decision, 'ask', cmd);
+    assert.equal(r.ruleId, 'deploy.undeclared-destination', cmd);
+    assert.ok(!/[.\n]$/.test(r.reason), 'reason không kết thúc bằng dấu chấm');
+  }
+});
+
+test('lệnh LẤY VỀ thì không hỏi — đây là phần giữ số prompt thấp', () => {
+  const p = withHosts();
+  for (const cmd of ['curl https://unknown.example', 'curl -O https://x.example/f.tar.gz',
+                     'curl -I https://unknown.example', 'curl -fsSL https://x.example/s.sh',
+                     'scp deploy@1.2.3.4:/var/log/app.log .',
+                     'rsync -avz deploy@1.2.3.4:/var/log ./logs',
+                     'curl -X GET https://unknown.example']) {
+    assert.equal(evaluate(shell(cmd), p).decision, 'allow', cmd);
+  }
+});
+
+test('host ĐÃ khai thì không hỏi, và glob hoạt động', () => {
+  const p = withHosts();
+  for (const cmd of ['scp ./dist deploy@staging.acme.internal:/var/www',
+                     'ssh staging.acme.internal "uptime"',
+                     'rsync -avz ./dist web1.prod.acme.internal:/var/www',
+                     'curl -X POST https://staging.acme.internal/hook -d @x']) {
+    assert.equal(evaluate(shell(cmd), p).decision, 'allow', cmd);
+  }
+});
+
+test('chưa khai declaredHosts thì KHÔNG hỏi gì', () => {
+  // Phép thử chống prompt fatigue: dự án chưa cấu hình mà đã hỏi thì dev sẽ học
+  // cách bấm OK, và confirm deploy mất giá trị.
+  const p = withDeploy();
+  for (const cmd of ['scp ./dist deploy@1.2.3.4:/var/www', 'ssh x "y"',
+                     'curl -X POST https://x.example -d @f']) {
+    assert.equal(evaluate(shell(cmd), p).decision, 'allow', cmd);
+  }
+});
+
+test('URL không đọc được thì không hỏi', () => {
+  // Một prompt về host không đọc được là một prompt không hành động được, và nó
+  // chỉ dạy dev bấm qua.
+  const p = withHosts();
+  // Biến không nở: token không bắt đầu bằng scheme nên bị lọc trước cả new URL
+  assert.equal(evaluate(shell('curl -X POST "$ENDPOINT" -d @dist.zip'), p).decision, 'allow');
+  assert.equal(evaluate(shell('curl -X POST $API/hook -d @x'), p).decision, 'allow');
+  // Và đây là nhân chứng chạm ĐƯỜNG NÉM của new URL: token CÓ scheme nhưng
+  // malformed. Mutation test bắt được rằng hai ca trên không kiểm try/catch —
+  // chúng không bao giờ tới đó.
+  assert.throws(() => new URL('https://['), 'nhân chứng phải thật sự làm new URL ném');
+  assert.equal(evaluate(shell('curl -X POST https://[ -d @x'), p).decision, 'allow');
+});
+
+test('host so khớp không phân biệt hoa thường', () => {
+  const p = withHosts();
+  assert.equal(evaluate(shell('ssh STAGING.ACME.INTERNAL "uptime"'), p).decision, 'allow');
+});
+
+test('deny của rule khác THẮNG ask của rule này', () => {
+  // Không phải chuyện của dispatch: ngay trong nhóm, một lệnh vừa đẩy tới host lạ
+  // vừa là đích chưa khai thì phải chặn, không phải hỏi.
+  const p = withHosts();
+  assert.equal(evaluate(shell('./scripts/deploy.sh xyz'), p).ruleId,
+    'deploy.undeclared-target');
+});

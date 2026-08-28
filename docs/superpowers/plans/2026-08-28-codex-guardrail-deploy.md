@@ -1112,7 +1112,7 @@ git add lib/rules/deploy.mjs policy/default.json tests/rules/ && git commit -m "
 - Consumes: `ask` từ `lib/result.mjs` (Task 2); `basename` từ `lib/tokenize.mjs`
 - Produces: `sshParts(argv) => {target, remote}` và `scpHosts(argv) => string[]` export từ `lib/rules/infra.mjs` (chữ ký giữ nguyên, chỉ thêm `export`)
 
-- [ ] **Step 1: Viết test đỏ**
+- [x] **Step 1: Viết test đỏ**
 
 ```js
 const withHosts = () => mergePolicy(P0, {
@@ -1168,12 +1168,12 @@ test('URL không parse được thì không hỏi', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy để thấy đỏ**
+- [x] **Step 2: Chạy để thấy đỏ**
 
 Run: `node --test tests/rules/deploy.test.mjs`
 Expected: FAIL — trả `allow` thay vì `ask`
 
-- [ ] **Step 3: Export lại bộ bóc host từ `infra.mjs`**
+- [x] **Step 3: Export lại bộ bóc host từ `infra.mjs`**
 
 `lib/rules/infra.mjs` — đổi `function sshParts` thành `export function sshParts`, `function scpHosts` thành `export function scpHosts`. Kèm comment:
 
@@ -1182,7 +1182,7 @@ Expected: FAIL — trả `allow` thay vì `ask`
 // là đúng lớp bug mà `lib/argv.mjs` sinh ra để chặn: sửa một chỗ quên chỗ kia.
 ```
 
-- [ ] **Step 4: Cài rule**
+- [x] **Step 4: Cài rule**
 
 Thêm import và hằng số:
 
@@ -1252,12 +1252,12 @@ Khai ngoài vòng lặp, cạnh `denyDirectRes`:
 
 Và thêm `"declaredHosts": []` vào khối `deploy` của `policy/default.json` — mảng rỗng vĩnh viễn, cùng lý do §6.1.
 
-- [ ] **Step 5: Chạy test**
+- [x] **Step 5: Chạy test**
 
 Run: `node --test tests/`
 Expected: tất cả xanh.
 
-- [ ] **Step 6: Đo số prompt trên tập lệnh hằng ngày**
+- [x] **Step 6: Đo số prompt trên tập lệnh hằng ngày**
 
 ```bash
 node --input-type=module -e "import {evaluate} from './lib/rules/deploy.mjs'; import {loadDefaultPolicy,mergePolicy} from './lib/policy.mjs'; const p=mergePolicy(loadDefaultPolicy(),{deploy:{entrypoints:['./d.sh'],targets:[{name:'x'}],declaredHosts:['staging.acme.internal']}}); const cmds=['curl -fsSL https://deb.nodesource.com/setup_20.x','curl -s https://api.github.com/repos/x/y','curl -o out.tar.gz https://x/y.tar.gz','curl -I https://example.com','curl https://localhost:3000/health','ssh staging.acme.internal uptime','scp staging.acme.internal:/var/log/app.log .','rsync -avz staging.acme.internal:/var/log ./logs','curl -s http://localhost:8080/metrics','curl --version','curl -L https://install.example/script','npm install','git fetch origin','ssh-add -l','curl -sS https://raw.githubusercontent.com/a/b/main/f.sh','scp ./notes.md staging.acme.internal:/tmp/','curl -X GET https://api.example/items','curl -H \"Accept: json\" https://api.example/x','rsync -av ./src ./backup','curl -w \"%{http_code}\" -o /dev/null https://example.com']; let asks=0; for (const c of cmds) { const r=evaluate({tool:'Bash',command:c,patchFiles:[],cwd:'/r',projectRoot:'/r',escapes:new Set(),permissionMode:'default'},p); if (r.decision==='ask') { asks++; console.log('HỎI:', c); } } console.log('số prompt:', asks, '/', cmds.length, '(phải là 0)')"
@@ -1265,14 +1265,14 @@ node --input-type=module -e "import {evaluate} from './lib/rules/deploy.mjs'; im
 
 Expected: `0`. Nếu có prompt nào, điều kiện hỏi còn quá rộng — thu hẹp, đừng chấp nhận.
 
-- [ ] **Step 7: Mutation test**
+- [x] **Step 7: Mutation test**
 
 1. Bỏ điều kiện `curlPushes(argv)` (hỏi với mọi `curl`). Expected: test `lệnh LẤY VỀ thì không hỏi` đỏ.
 2. Trong `remoteDestHost`, đổi `positional[positional.length - 1]` thành `positional[0]`. Expected: test `lệnh ĐẨY...` và `lệnh LẤY VỀ...` đỏ (hai chiều đảo nhau).
 
 Hoàn nguyên cả hai.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add lib/rules/deploy.mjs lib/rules/infra.mjs policy/default.json tests/rules/deploy.test.mjs && git commit -m "feat(deploy): hỏi khi đẩy dữ liệu tới host chưa khai, không hỏi khi lấy về"
