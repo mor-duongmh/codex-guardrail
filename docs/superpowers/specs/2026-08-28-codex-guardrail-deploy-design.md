@@ -71,6 +71,25 @@ cho qua            | apply_patch src/index.js
 
 ruleId là của **dự án**, nên khoá escape cũng theo dự án. Nhóm này không cần gì mới.
 
+### 2.6 Bịt ở mức subcommand: đo được, không cần code
+
+`docker push` không được chặn bằng cách thêm `docker` vào `denyBinaries` — dev dùng `docker ps`/`build`/`compose` liên tục. Nhưng `infra.denyPatterns` khớp **tiền tố của lệnh hữu hiệu từng segment**, nên nó bịt được ở mức subcommand. Đây là cơ chế đang chặn `npm publish` sẵn.
+
+Đo với `denyPatterns: ['docker\\s+push\\b']`:
+
+| Kết quả | Lệnh |
+|---|---|
+| CHẶN | `docker push docker.io/me/app:latest` |
+| CHẶN | `sudo docker push docker.io/me/app` (wrapper được `effectiveArgv` bóc) |
+| CHẶN | `cd build && docker push me/app` (khớp theo segment) |
+| cho qua | `docker ps`, `docker ps -a`, `docker build -t app .`, `docker compose up -d` |
+| cho qua | `docker images`, `docker exec -it app sh`, `docker logs -f app`, `docker run --rm alpine echo hi` |
+| cho qua | `grep -rn "docker push" docs/`, `echo docker push` |
+
+4/4 chặn, 10/10 cho qua, kể cả hai bẫy false-positive điển hình (`grep`, `echo`).
+
+**Hệ quả cho thiết kế:** mục nợ "`allowBinaries` thô ở mức binary" (§15 #10 spec chính) KHÔNG chặn nhóm `deploy`. Với công cụ mà chỉ MỘT subcommand là nguy hiểm, `denyPatterns` đã đủ. Cửa thoát theo subcommand vẫn cần cho chiều ngược lại (`wrangler dev` bị chặn oan trong khi `wrangler deploy` phải chặn), nhưng đó là bài toán riêng.
+
 ### 2.5 Môi trường thực tế
 
 Deploy chạy bằng **script sẵn có trong repo, mỗi dự án một kiểu**. Host **vừa** tên thật **vừa** alias `~/.ssh/config`. Team có dev trên **Windows và Ubuntu**. `~/.ssh/config` của lead: 3 khối `Host`, cả 3 có `HostName`, không `Include`, không `Match`, không `ProxyJump`, không wildcard.
@@ -318,7 +337,12 @@ Ngoài các nguyên tắc đã có (§14 spec chính), nhóm này bắt buộc:
 
 1. **Script nhận target qua tham số vị trí hay cờ?** `./deploy.sh prod` hay `./deploy.sh --env=prod`. Ảnh hưởng cách bóc target ở §5.2. Mỗi dự án một kiểu thì có thể cần khai thêm, ví dụ `targetArg: "positional" | "--env"`.
 2. ~~Có dự án nào deploy nhiều target trong một lệnh không?~~ **ĐÃ CHỐT 2026-08-28: deploy TUẦN TỰ, mỗi lệnh một đích.** Hệ quả: §5.3 không cần vòng lặp, và lệnh nhiều đích bị `deploy.ambiguous-target` chặn (§5.4).
-3. **Mười công cụ lọt ở §2.1 có cái nào team đang dùng hợp lệ không?** Thêm vào `infra.denyBinaries` là chặn cứng; nếu `docker push` đang dùng cho registry nội bộ thì cần cửa thoát theo subcommand — vốn đã là mục nợ Plan 2.
+3. **Mười công cụ lọt ở §2.1 — cái nào team đang dùng hợp lệ?** Đã chốt một phần 2026-08-28:
+
+   - `docker push`: **team không dùng bao giờ.** Bịt bằng `denyPatterns: ['docker\\s+push\\b']`, đã đo ở §2.6 — 4/4 chặn, 10/10 lệnh docker hằng ngày vẫn qua. Zero code.
+   - **Nhóm A, đề xuất chặn cứng qua `denyBinaries`** (chờ bạn phủ quyết): `surge`, `gh-pages`, `netlify`, `firebase`, `railway`. Lý do coi là an toàn để chặn: chúng chỉ dùng để publish ra hosting công khai, không có công dụng local nào; và `surge`/`gh-pages` đúng là ca "domain free" ở §1.
+   - **Nhóm B, KHÔNG chặn cứng được:** `scp`, `rsync`, `ssh`, `curl`. Dev dùng hằng ngày. Chúng phải đi qua phễu-entrypoint (§5.5) chứ không qua denylist.
+
 
 4. **`ask` có thật sự hỏi dưới `permission_mode: "bypassPermissions"` không?** ẨN SỐ CHẶN THIẾT KẾ. Mọi payload thật Task 0 bắt được đều ở chế độ đó. Cần một spike đúng kiểu Task 0: phát `permissionDecision: "ask"` từ hook, chạy lệnh thật trong Codex, xem có prompt hay tự chạy. Ba kết quả, ba thiết kế khác nhau:
    - Có hỏi → `ask` là cơ chế chính, `requireHumanEscape` chỉ còn cho phiên không người trực.
