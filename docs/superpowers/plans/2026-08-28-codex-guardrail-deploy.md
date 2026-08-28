@@ -969,7 +969,7 @@ git add lib/rules/deploy.mjs tests/rules/deploy.test.mjs && git commit -m "feat(
 - Consumes: `cfg.denyDirect` (mảng chuỗi regex, mặc định `[]`)
 - Produces: không thêm export mới
 
-- [ ] **Step 1: Viết test đỏ**
+- [x] **Step 1: Viết test đỏ**
 
 Vào `tests/rules/infra.test.mjs`:
 
@@ -1024,12 +1024,12 @@ test('denyDirect không khớp văn bản trong tham số', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy để thấy đỏ**
+- [x] **Step 2: Chạy để thấy đỏ**
 
 Run: `node --test tests/rules/`
 Expected: FAIL cả hai file
 
-- [ ] **Step 3: Thêm dữ liệu vào `policy/default.json`**
+- [x] **Step 3: Thêm dữ liệu vào `policy/default.json`**
 
 `infra.denyBinaries` — thêm `"surge"`, `"gh-pages"`. Chỉ hai công cụ này ở mức binary, vì cả hai **không có chế độ local nào**: gọi trần `surge` là deploy luôn.
 
@@ -1046,7 +1046,7 @@ Expected: FAIL cả hai file
 
 `(?![\w-])` không phải trang trí: nó là thứ giữ `netlify deploying-notes.md` không bị coi là `netlify deploy`.
 
-- [ ] **Step 4: Cài `deploy.direct-tool`**
+- [x] **Step 4: Cài `deploy.direct-tool`**
 
 Trong `evaluate`, trong vòng lặp segment, **trước** `matchEntry`:
 
@@ -1075,12 +1075,12 @@ Biên dịch regex **ngoài** vòng lặp segment, cạnh `const names = ...`:
 
 `denyDirect` mặc định rỗng nên đường nóng không trả phí gì.
 
-- [ ] **Step 5: Chạy test**
+- [x] **Step 5: Chạy test**
 
 Run: `node --test tests/`
 Expected: tất cả xanh, 0 fail.
 
-- [ ] **Step 6: Đo lại 6 công cụ ở §2.1 mà task này nhận**
+- [x] **Step 6: Đo lại 6 công cụ ở §2.1 mà task này nhận**
 
 ```bash
 node --input-type=module -e "import {runHook} from './lib/dispatch.mjs'; const p=c=>JSON.stringify({hook_event_name:'PreToolUse',tool_name:'Bash',cwd:process.cwd(),permission_mode:'default',tool_input:{command:c}}); for (const c of ['netlify deploy --prod','firebase deploy','surge ./dist my-app.surge.sh','railway up','docker push docker.io/me/app','npx gh-pages -d dist']) console.log(runHook(p(c),{GUARDRAIL_AUDIT_PATH:'/dev/null'}).decision, c)"
@@ -1088,11 +1088,11 @@ node --input-type=module -e "import {runHook} from './lib/dispatch.mjs'; const p
 
 Expected: `deny` cho cả 6. Bốn mục còn lại (`scp`/`rsync`/`ssh`/`curl`) là Task 7.
 
-- [ ] **Step 7: Mutation test**
+- [x] **Step 7: Mutation test**
 
 Bỏ `(?![\w-])` khỏi `netlify\s+deploy`. Expected: test `ranh giới subcommand` đỏ. Hoàn nguyên.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add lib/rules/deploy.mjs policy/default.json tests/rules/ && git commit -m "feat(deploy): chặn công cụ publish trực tiếp, mức subcommand cho công cụ có chế độ local"

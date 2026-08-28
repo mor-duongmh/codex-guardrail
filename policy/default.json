@@ -17,7 +17,8 @@
       "psql", "mysql", "mysqldump", "mongosh", "mongo", "redis-cli",
       "aws", "gcloud", "gsutil", "az", "oci", "kubectl", "helm",
       "terraform", "pulumi", "ansible", "flyctl", "heroku", "vercel",
-      "wrangler", "supabase"
+      "wrangler", "supabase",
+      "surge", "gh-pages"
     ],
     "allowBinaries": [],
     "denyPatterns": [
@@ -25,7 +26,11 @@
       "docker\\s+volume\\s+rm(?![\\w-])",
       "npm\\s+publish(?![\\w-])",
       "rm\\s+(?:-\\S+\\s+)*-\\S*[rR]\\S*\\s+(?:-\\S+\\s+)*/+\\*?(\\s+.*)?$",
-      "rm\\s+(?:-\\S+\\s+)*-\\S*[rR]\\S*\\s+(?:-\\S+\\s+)*~/*\\*?(\\s+.*)?$"
+      "rm\\s+(?:-\\S+\\s+)*-\\S*[rR]\\S*\\s+(?:-\\S+\\s+)*~/*\\*?(\\s+.*)?$",
+      "netlify\\s+deploy(?![\\w-])",
+      "firebase\\s+deploy(?![\\w-])",
+      "railway\\s+up(?![\\w-])",
+      "docker\\s+push(?![\\w-])"
     ],
     "ssh": { "denyHosts": [], "inspectRemoteCommand": true }
   },

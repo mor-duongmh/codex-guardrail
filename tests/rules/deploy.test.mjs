@@ -289,3 +289,45 @@ test('ruleId chứa tên target, không dùng chung một khoá escape', () => {
   assert.equal(evaluate(shell('./d.sh prod'), p).ruleId, 'deploy.target.prod');
   assert.equal(evaluate(shell('./d.sh dr'), p).ruleId, 'deploy.target.dr');
 });
+
+// --- deploy.direct-tool (Task 6) --------------------------------------------
+
+test('denyDirect của dự án chặn công cụ gọi trực tiếp, hint chỉ sang script', () => {
+  const p = withDeploy({ denyDirect: ['mydeploy\\b'] });
+  const r = evaluate(shell('mydeploy --prod'), p);
+  assert.equal(r.ruleId, 'deploy.direct-tool');
+  assert.match(r.hint, /scripts\/deploy\.sh/);
+  assert.ok(!/[.\n]$/.test(r.reason), 'reason không kết thúc bằng dấu chấm');
+});
+
+test('denyDirect đi qua effectiveArgv', () => {
+  const p = withDeploy({ denyDirect: ['mydeploy\\b'] });
+  for (const cmd of ['sudo mydeploy --prod', 'npx mydeploy', 'cd web && mydeploy',
+                     'bash -c "mydeploy"']) {
+    assert.equal(evaluate(shell(cmd), p).ruleId, 'deploy.direct-tool', cmd);
+  }
+});
+
+test('denyDirect KHÔNG khớp văn bản nằm trong tham số', () => {
+  const p = withDeploy({ denyDirect: ['mydeploy\\b'] });
+  for (const cmd of ['git commit -m "sửa mydeploy"', 'grep -rn mydeploy docs/',
+                     'echo mydeploy']) {
+    assert.equal(evaluate(shell(cmd), p).decision, 'allow', cmd);
+  }
+});
+
+// denyDirect khớp lệnh hữu hiệu THÔ, y hệt `infra.denyPatterns` — nó KHÔNG chuẩn
+// hoá đường dẫn như matchEntry. Đó là chủ ý: chuẩn hoá ở đây sẽ sinh một kiểu khớp
+// thứ hai mà người viết policy phải học riêng. Hệ quả phải biết: pattern viết theo
+// đúng chuỗi người gõ, `./` bao gồm.
+test('denyDirect khớp chuỗi thô, không chuẩn hoá ./ như entrypoint', () => {
+  const p = withDeploy({ denyDirect: ['scripts/deploy\\.sh\\b'] });
+  // KHÔNG khớp: lệnh thật là `./scripts/deploy.sh`, pattern thiếu `./`
+  assert.notEqual(evaluate(shell('./scripts/deploy.sh staging'), p, () => 'develop').ruleId,
+    'deploy.direct-tool');
+  // Khớp khi pattern viết đúng chuỗi người gõ
+  const p2 = withDeploy({ denyDirect: ['\\./scripts/deploy\\.sh\\b'] });
+  assert.equal(evaluate(shell('./scripts/deploy.sh staging'), p2, () => 'develop').ruleId,
+    'deploy.direct-tool',
+    'denyDirect thắng entrypoint: dự án đã tuyên bố nó không được gọi trực tiếp');
+});
