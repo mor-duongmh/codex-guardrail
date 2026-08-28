@@ -801,7 +801,7 @@ git add lib/rules/deploy.mjs policy/default.json tests/rules/deploy.test.mjs && 
 - Consumes: `currentBranch(cwd)` từ `lib/rules/git-workflow.mjs`; `globToRegExp`, `matchesAny` (đã import ở Task 4)
 - Produces: `evaluate(ctx, policy, currentBranch = defaultCurrentBranch)` — tham số thứ ba có mặc định, nên mọi lời gọi hai tham số ở Task 3/4 và ở `dispatch.mjs` vẫn đúng
 
-- [ ] **Step 1: Viết test đỏ**
+- [x] **Step 1: Viết test đỏ**
 
 ```js
 test('branch đúng thì cho qua, branch sai thì chặn — cả hai chiều', () => {
@@ -878,12 +878,12 @@ test('ruleId chứa tên target, không dùng chung một khoá', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy để thấy đỏ**
+- [x] **Step 2: Chạy để thấy đỏ**
 
 Run: `node --test tests/rules/deploy.test.mjs`
 Expected: FAIL — `deploy.sh prod` với branch `develop` đang trả `allow`
 
-- [ ] **Step 3: Cài rule**
+- [x] **Step 3: Cài rule**
 
 Sửa chữ ký để `currentBranch` tiêm được:
 
@@ -925,12 +925,12 @@ Trong nhánh `found.length === 1` (tức sau cả hai khối `found.length > 1` 
 
 `ruleId` phải chứa tên target: dùng chung một `deploy.high-consequence` thì một lần escape mở cho **mọi** đích hệ quả cao, mà cả điểm của nó là mở đúng một đích.
 
-- [ ] **Step 4: Chạy test**
+- [x] **Step 4: Chạy test**
 
 Run: `node --test tests/rules/deploy.test.mjs`
 Expected: PASS (21 test)
 
-- [ ] **Step 5: Kiểm đường allow không spawn git**
+- [x] **Step 5: Kiểm đường allow không spawn git**
 
 Run: `node --test tests/latency.test.mjs`
 Expected: PASS, phần dôi của đường allow không tăng.
@@ -943,14 +943,14 @@ node --input-type=module -e "import {evaluate} from './lib/rules/deploy.mjs'; im
 
 Expected: `1`.
 
-- [ ] **Step 6: Mutation test**
+- [x] **Step 6: Mutation test**
 
 1. Đổi `if (!branch || !matchesAny(...))` thành `if (branch && !matchesAny(...))`. Expected: test `không biết branch thì chặn, không đoán` đỏ.
 2. Chuyển khối `requireHumanEscape` xuống **sau** phép kiểm branch. Expected: test `requireHumanEscape thắng branch-mismatch` đỏ.
 
 Hoàn nguyên cả hai.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add lib/rules/deploy.mjs tests/rules/deploy.test.mjs && git commit -m "feat(deploy): branch phải khớp đích, và đích hệ quả cao đòi người xác nhận"

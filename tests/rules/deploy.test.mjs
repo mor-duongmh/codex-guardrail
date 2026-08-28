@@ -46,6 +46,9 @@ test('đích lạ thì chặn, và message phải liệt kê đích đã khai', 
 
 test('bóc đích không phụ thuộc vị trí hay cờ', () => {
   const p = withDeploy();
+  // Tiêm branch hợp lệ của `staging`: test này về BÓC ĐÍCH, không về branch.
+  // Không tiêm thì currentBranch thật chạy với cwd giả và trả null -> branch-mismatch.
+  const br = () => 'develop';
   for (const cmd of [
     './scripts/deploy.sh staging',
     './scripts/deploy.sh --env=staging',
@@ -55,7 +58,7 @@ test('bóc đích không phụ thuộc vị trí hay cờ', () => {
     'bash scripts/deploy.sh staging',
     'sudo bash ./scripts/deploy.sh staging',
   ]) {
-    assert.equal(evaluate(shell(cmd), p).decision, 'allow', cmd);
+    assert.equal(evaluate(shell(cmd), p, br).decision, 'allow', cmd);
   }
 });
 
@@ -106,7 +109,8 @@ test('lệnh không khớp entrypoint nào thì không quan tâm', () => {
 test('khớp theo từng segment, không chỉ segment đầu', () => {
   const p = withDeploy();
   assert.equal(evaluate(shell('cd web && ./scripts/deploy.sh'), p).ruleId, 'deploy.no-target');
-  assert.equal(evaluate(shell('npm run build && ./scripts/deploy.sh staging'), p).decision,
+  assert.equal(
+    evaluate(shell('npm run build && ./scripts/deploy.sh staging'), p, () => 'develop').decision,
     'allow');
 });
 
@@ -190,4 +194,98 @@ test('detectScripts rỗng thì không chặn gì', () => {
   const p = mergePolicy(P0, {});
   p.deploy = { ...p.deploy, detectScripts: [] };
   assert.equal(evaluate(rootless('./scripts/deploy.sh prod'), p).decision, 'allow');
+});
+
+// --- deploy.branch-mismatch + deploy.target.<name> (Task 5) ------------------
+// currentBranch tiêm qua tham số thứ 3 CÓ MẶC ĐỊNH: nó spawn `git`, nên test
+// không phải dựng repo thật, và đường allow đo được là không gọi nó.
+
+test('branch đúng thì cho qua, branch sai thì chặn — cả hai chiều', () => {
+  const p = withDeploy();
+  const br = () => 'develop';
+  assert.equal(evaluate(shell('./scripts/deploy.sh staging'), p, br).decision, 'allow');
+  const r = evaluate(shell('./scripts/deploy.sh prod'), p, br);
+  assert.equal(r.ruleId, 'deploy.branch-mismatch');
+  assert.match(r.reason, /develop/);
+  assert.match(r.reason, /release\/\*/);
+  assert.ok(!/[.\n]$/.test(r.reason), 'reason không kết thúc bằng dấu chấm');
+});
+
+test('glob branch hoạt động', () => {
+  const p = withDeploy();
+  assert.equal(evaluate(shell('./scripts/deploy.sh prod'), p, () => 'release/1.4').decision,
+    'allow');
+  assert.equal(evaluate(shell('./scripts/deploy.sh prod'), p, () => 'release').ruleId,
+    'deploy.branch-mismatch');
+});
+
+test('tổ hợp sai không biểu diễn được', () => {
+  // cả `develop` lẫn `prod` đều CÓ trong policy, nhưng ghép lại thì không hợp lệ
+  const p = withDeploy();
+  assert.equal(evaluate(shell('./scripts/deploy.sh prod'), p, () => 'develop').ruleId,
+    'deploy.branch-mismatch');
+  assert.equal(evaluate(shell('./scripts/deploy.sh staging'), p, () => 'release/1.4').ruleId,
+    'deploy.branch-mismatch');
+});
+
+test('không biết branch thì chặn, không đoán', () => {
+  const p = withDeploy();
+  assert.equal(evaluate(shell('./scripts/deploy.sh prod'), p, () => null).ruleId,
+    'deploy.branch-mismatch');
+});
+
+test('target không khai branches thì bỏ qua phép kiểm branch', () => {
+  const p = mergePolicy(P0, {
+    deploy: { entrypoints: ['./d.sh'], targets: [{ name: 'sandbox' }] },
+  });
+  assert.equal(evaluate(shell('./d.sh sandbox'), p, () => 'bất-kỳ-branch').decision, 'allow');
+});
+
+test('đường allow KHÔNG gọi currentBranch (nó spawn git)', () => {
+  const p = withDeploy();
+  let calls = 0;
+  const br = () => { calls++; return 'develop'; };
+  for (const cmd of ['npm test', 'git status', 'ls -la', './scripts/deploy.sh']) {
+    evaluate(shell(cmd), p, br);
+  }
+  assert.equal(calls, 0, 'no-target chặn trước khi cần branch, và lệnh thường không chạm tới');
+  evaluate(shell('./scripts/deploy.sh staging'), p, br);
+  assert.equal(calls, 1, 'chỉ gọi khi đã khớp entrypoint VÀ đã có target hợp lệ');
+});
+
+test('requireHumanEscape chặn kể cả khi target và branch đều đúng', () => {
+  const p = mergePolicy(P0, {
+    deploy: {
+      entrypoints: ['./scripts/deploy.sh'],
+      targets: [{ name: 'prod', branches: ['main'], requireHumanEscape: true }],
+    },
+  });
+  const r = evaluate(shell('./scripts/deploy.sh prod'), p, () => 'main');
+  assert.equal(r.ruleId, 'deploy.target.prod');
+  assert.match(r.hint, /CODEX_GUARDRAIL_ALLOW=deploy\.target\.prod/);
+});
+
+test('requireHumanEscape thắng branch-mismatch: không để người dùng sửa branch rồi tưởng xong', () => {
+  const p = mergePolicy(P0, {
+    deploy: {
+      entrypoints: ['./scripts/deploy.sh'],
+      targets: [{ name: 'prod', branches: ['main'], requireHumanEscape: true }],
+    },
+  });
+  assert.equal(evaluate(shell('./scripts/deploy.sh prod'), p, () => 'develop').ruleId,
+    'deploy.target.prod');
+});
+
+test('ruleId chứa tên target, không dùng chung một khoá escape', () => {
+  const p = mergePolicy(P0, {
+    deploy: {
+      entrypoints: ['./d.sh'],
+      targets: [
+        { name: 'prod', requireHumanEscape: true },
+        { name: 'dr', requireHumanEscape: true },
+      ],
+    },
+  });
+  assert.equal(evaluate(shell('./d.sh prod'), p).ruleId, 'deploy.target.prod');
+  assert.equal(evaluate(shell('./d.sh dr'), p).ruleId, 'deploy.target.dr');
 });
