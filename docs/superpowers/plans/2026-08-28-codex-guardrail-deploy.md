@@ -202,7 +202,7 @@ git add lib/tokenize.mjs lib/argv.mjs tests/argv.test.mjs && git commit -m "fix(
 - Consumes: `ctx.permissionMode` từ `lib/context.mjs:138` (`string | null`)
 - Produces: `ask(ruleId, reason, hint) => {decision:'ask', ruleId, reason, hint}`; `runHook` trả `{decision:'ask', stdout, stderr}` với `permissionDecision: 'ask'` trong JSON
 
-- [ ] **Step 1: Viết test đỏ**
+- [x] **Step 1: Viết test đỏ**
 
 Thêm vào `tests/dispatch.test.mjs`:
 
@@ -238,12 +238,12 @@ test('deny THẮNG ask kể cả khi ask đến trước', () => {
 
 Helper `runHookWith` / `runHookTwoRules`: dùng đúng nếp `freshAudit()` đã có trong file, và tiêm rule giả qua `REGISTRY`. Nếu `REGISTRY` chưa export được thì test qua `deploy.undeclared-destination` thật ở Task 7 và **giữ nguyên 4 assert trên**, chỉ đổi cách dựng ctx.
 
-- [ ] **Step 2: Chạy để thấy đỏ**
+- [x] **Step 2: Chạy để thấy đỏ**
 
 Run: `node --test tests/dispatch.test.mjs`
 Expected: FAIL — `ask` bị coi là allow, `out.decision === 'allow'`
 
-- [ ] **Step 3: Thêm `ask` vào `lib/result.mjs`**
+- [x] **Step 3: Thêm `ask` vào `lib/result.mjs`**
 
 ```js
 export const ALLOW = Object.freeze({ decision: 'allow' });
@@ -261,7 +261,7 @@ export function ask(ruleId, reason, hint) {
 }
 ```
 
-- [ ] **Step 4: Chế độ nào thì `ask` có nghĩa**
+- [x] **Step 4: Chế độ nào thì `ask` có nghĩa**
 
 Thêm vào `lib/dispatch.mjs`, cạnh `SAFETY_GROUPS`:
 
@@ -280,7 +280,7 @@ function askIsAnswerable(ctx) {
 }
 ```
 
-- [ ] **Step 5: Đường phát `ask`**
+- [x] **Step 5: Đường phát `ask`**
 
 Thêm cạnh `deny()`:
 
@@ -311,7 +311,7 @@ export function askMessage(result, ctx) {
 }
 ```
 
-- [ ] **Step 6: Sửa vòng lặp — deny phải thắng ask**
+- [x] **Step 6: Sửa vòng lặp — deny phải thắng ask**
 
 Trong `runHook`, đổi `if (res.decision !== 'deny') continue;` thành:
 
@@ -351,12 +351,12 @@ Sau vòng lặp, thay `return allow(stderr)`:
 
 Bóc khối `common` hiện tại (dispatch.mjs:144-163) thành `commonFor(res)` để dùng được ở cả ba chỗ. Giữ nguyên từng trường và từng comment — chúng ghi lý do `?? undefined` thay vì `?? null`, và lý do `currentBranch` chỉ gọi ngoài đường allow.
 
-- [ ] **Step 7: Chạy test**
+- [x] **Step 7: Chạy test**
 
 Run: `node --test tests/dispatch.test.mjs`
 Expected: PASS
 
-- [ ] **Step 8: Chạy toàn bộ + mutation**
+- [x] **Step 8: Chạy toàn bộ + mutation**
 
 Run: `node --test tests/`
 Expected: 411 + 4 = 415 pass, 0 fail.
@@ -365,7 +365,7 @@ Mutation 1: đổi `MODES_WITH_HUMAN` thành `new Set(['default','acceptEdits','
 
 Mutation 2: đổi `pendingDeny ??= res` thành `pendingAsk ??= res`. Expected: test `permissionMode thiếu thì ask hạ về deny` đỏ. Hoàn nguyên.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add lib/result.mjs lib/dispatch.mjs tests/dispatch.test.mjs && git commit -m "feat(dispatch): ask là quyết định hạng nhất, deny thắng ask, hạ ask khi không có ai bấm"

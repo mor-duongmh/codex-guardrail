@@ -324,3 +324,87 @@ test('có project root thì deny message không mang cảnh báo đó', () => {
   const reason = JSON.parse(out).hookSpecificOutput.permissionDecisionReason;
   assert.ok(!reason.includes('POLICY MẶC ĐỊNH'), `cảnh báo xuất hiện oan:\n${reason}`);
 });
+
+// --- `ask` là quyết định hạng nhất (Task 2) -----------------------------------
+// Registry tiêm qua tham số có mặc định, cùng nếp DI đã dùng ở `parseCommand`
+// (platform) và `inferPolicy` (runGit): không phải export REGISTRY ra chỉ để test.
+
+const askPayload = (cwd, command, mode) => JSON.stringify({
+  hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd,
+  ...(mode === undefined ? {} : { permission_mode: mode }),
+  tool_input: { command },
+});
+
+const fakeRule = (result) => ({ evaluate: () => result });
+const reg = (...groups) => ({ PreToolUse: { Bash: groups } });
+
+const ASK = { decision: 'ask', ruleId: 'deploy.undeclared-destination', reason: 'đẩy tới 1.2.3.4', hint: 'xác nhận' };
+const DENY = { decision: 'deny', ruleId: 'infra.deny-binary', reason: 'psql bị chặn', hint: 'dùng cách khác' };
+const decisionOf = (r) => JSON.parse(r.stdout).hookSpecificOutput.permissionDecision;
+
+test('ask phát ra permissionDecision ask ở chế độ có người trả lời', () => {
+  for (const mode of ['default', 'acceptEdits', 'plan']) {
+    const r = runHook(askPayload(repo(), 'scp a b:/c', mode), {},
+      reg(['deploy', fakeRule(ASK)]));
+    assert.equal(r.decision, 'ask', mode);
+    assert.equal(decisionOf(r), 'ask', mode);
+    assert.match(reasonOf(r), /deploy\.undeclared-destination/);
+  }
+});
+
+test('ask hạ về deny ở chế độ không có ai bấm', () => {
+  for (const mode of ['dontAsk', 'bypassPermissions']) {
+    const r = runHook(askPayload(repo(), 'scp a b:/c', mode), {},
+      reg(['deploy', fakeRule(ASK)]));
+    assert.equal(r.decision, 'deny', mode);
+    assert.equal(decisionOf(r), 'deny', mode);
+  }
+});
+
+test('permissionMode thiếu thì ask hạ về deny', () => {
+  // context.mjs cố ý để null chứ không đoán 'default'. Đoán 'default' là đoán
+  // rằng có prompt, tức lệch về phía CHO QUA ở đúng chỗ không được lệch.
+  const r = runHook(askPayload(repo(), 'scp a b:/c', undefined), {},
+    reg(['deploy', fakeRule(ASK)]));
+  assert.equal(r.decision, 'deny');
+});
+
+test('chế độ lạ thì ask hạ về deny — allow-list, không phải deny-list', () => {
+  const r = runHook(askPayload(repo(), 'scp a b:/c', 'chế-độ-codex-thêm-sau-này'), {},
+    reg(['deploy', fakeRule(ASK)]));
+  assert.equal(r.decision, 'deny');
+});
+
+test('deny THẮNG ask kể cả khi ask đến trước', () => {
+  // deploy chạy TRƯỚC infra. Nếu ask trả về ngay thì một ask của deploy sẽ che
+  // một deny của infra — biến lệnh phải chặn thành lệnh chỉ cần bấm OK.
+  const r = runHook(askPayload(repo(), 'scp a b:/c', 'default'), {},
+    reg(['deploy', fakeRule(ASK)], ['infra', fakeRule(DENY)]));
+  assert.equal(r.decision, 'deny');
+  assert.match(reasonOf(r), /infra\.deny-binary/);
+});
+
+test('ask ghi audit với decision="asked"', () => {
+  const dir = repo();
+  runHook(askPayload(dir, 'scp a b:/c', 'default'), {}, reg(['deploy', fakeRule(ASK)]));
+  const entries = readEntries(join(dir, 'audit.jsonl'));
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].decision, 'asked');
+  assert.equal(entries[0].ruleId, 'deploy.undeclared-destination');
+});
+
+test('escape đúng ruleId thì ask cũng bị bỏ qua', () => {
+  const r = runHook(askPayload(repo(), 'scp a b:/c', 'default'),
+    { CODEX_GUARDRAIL_ALLOW: 'deploy.undeclared-destination' },
+    reg(['deploy', fakeRule(ASK)]));
+  assert.equal(r.decision, 'allow');
+});
+
+test('message của ask không mang khuôn của deny', () => {
+  const r = runHook(askPayload(repo(), 'scp a b:/c', 'default'), {},
+    reg(['deploy', fakeRule(ASK)]));
+  const why = reasonOf(r);
+  assert.ok(!why.includes('guardrail chặn'), 'ask không phải một lệnh bị chặn');
+  assert.ok(why.includes('cần xác nhận'));
+  assert.ok(!/[.\n]$/.test(why), 'reason không được kết thúc bằng dấu chấm hay newline');
+});
