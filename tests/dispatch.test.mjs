@@ -207,9 +207,14 @@ test('apply_patch vô hại thì allow', () => {
   assert.equal(r.stderr, '');
 });
 
+// ctx phải có `projectRoot`: golden này ghim khuôn BÌNH THƯỜNG. Từ khi deny
+// message thêm cảnh báo "đang chạy policy mặc định" cho ca projectRoot=null, một
+// ctx rỗng `{}` sẽ kéo theo cảnh báo đó và golden không còn ghim khuôn nào rõ
+// ràng. Ca degraded có hai test riêng ngay bên dưới, cả hai chiều.
 test('denyMessage giữ đúng khuôn (golden)', () => {
   const msg = denyMessage(
-    { ruleId: 'infra.deny-binary', reason: 'LÝ DO', hint: 'GỢI Ý' }, {}
+    { ruleId: 'infra.deny-binary', reason: 'LÝ DO', hint: 'GỢI Ý' },
+    { projectRoot: '/x/demo', cwd: '/x/demo' },
   );
   assert.equal(msg,
 `✗ guardrail chặn: infra.deny-binary
@@ -285,4 +290,37 @@ test('dispatch ghi cwd vào audit log để chẩn đoán projectRoot=null', () 
     if (prev === undefined) delete process.env.GUARDRAIL_AUDIT_PATH;
     else process.env.GUARDRAIL_AUDIT_PATH = prev;
   }
+});
+
+// Đo được trên máy thật: người dùng mở Codex từ home nên payload có
+// `cwd: "/Users/haiduong"`, và `pwd` trong phiên đó xác nhận đúng là home. Nghĩa
+// là findProjectRoot trả null ĐÚNG, không phải bug.
+//
+// Nhưng hint của rule thì SAI trong ngữ cảnh đó: nó bảo "thêm vào
+// infra.allowBinaries trong codex-guardrail.json rồi mở PR", trong khi file đó
+// KHÔNG được đọc khi projectRoot là null. Người dùng sẽ sửa file, mở PR, được
+// duyệt — và không gì thay đổi. Chỉ người ta làm một việc vô ích là tệ hơn không
+// chỉ gì cả.
+test('deny message nói rõ đang chạy policy mặc định khi không có project root', () => {
+  const ev = JSON.stringify({
+    hook_event_name: 'PreToolUse', tool_name: 'Bash',
+    tool_input: { command: 'psql -l' }, cwd: tmpdir(),
+  });
+  const out = runHook(ev, { env: {} }).stdout;
+  const reason = JSON.parse(out).hookSpecificOutput.permissionDecisionReason;
+  assert.match(reason, /POLICY MẶC ĐỊNH/, `thiếu cảnh báo chế độ giảm năng lực:\n${reason}`);
+  assert.ok(reason.includes(tmpdir()), 'phải in cwd thật để người dùng đối chiếu');
+  assert.match(reason, /KHÔNG được đọc/, 'phải nói file policy không được đọc');
+});
+
+// Chiều ngược lại: có project root thì KHÔNG được thêm cảnh báo đó — nếu không
+// mọi deny trong dự án đều mang một đoạn nhiễu vô nghĩa, và dev học cách bỏ qua.
+test('có project root thì deny message không mang cảnh báo đó', () => {
+  const ev = JSON.stringify({
+    hook_event_name: 'PreToolUse', tool_name: 'Bash',
+    tool_input: { command: 'psql -l' }, cwd: process.cwd(),
+  });
+  const out = runHook(ev, { env: {} }).stdout;
+  const reason = JSON.parse(out).hookSpecificOutput.permissionDecisionReason;
+  assert.ok(!reason.includes('POLICY MẶC ĐỊNH'), `cảnh báo xuất hiện oan:\n${reason}`);
 });
