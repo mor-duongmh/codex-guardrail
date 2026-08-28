@@ -394,4 +394,20 @@ Ngoài các nguyên tắc đã có (§14 spec chính), nhóm này bắt buộc:
 
 5. ~~Tên chính xác của các chế độ `permission_mode`.~~ **ĐÃ CHỐT 2026-08-28** từ JSON Schema nhúng trong binary: `default`, `acceptEdits`, `plan`, `dontAsk`, `bypassPermissions`. Xem §3.9.
 
-6. **Máy dev thật đang chạy chế độ nào?** Sẽ tự trả lời ở lần chạy tiếp theo, vì audit log giờ ghi `permissionMode`. Đây là điều kiện tiên quyết của #4: không biết chế độ thật thì không biết `ask` có ý nghĩa gì với team này.
+6. ~~Máy dev thật đang chạy chế độ nào?~~ **ĐÃ ĐO 2026-08-28.** Entry thật từ phiên Codex của lead:
+
+   ```json
+   {"ts":"2026-08-28T07:45:15.524Z","decision":"denied","ruleId":"infra.deny-binary",
+    "event":"PreToolUse","tool":"Bash","repo":null,"branch":null,
+    "command":"psql --version","permissionMode":"default"}
+   ```
+
+   Chế độ là **`default`** — KHÔNG phải `bypassPermissions`. Cộng với việc `dontAsk` tồn tại như một chế độ RIÊNG, đây là bằng chứng mạnh nhất có được rằng `ask` được tôn trọng ở chế độ team này đang chạy. Nhánh hạ-về-`deny` (§3.9) vẫn phải làm, nhưng nó là đường phòng bị chứ không phải đường chính.
+
+   Ẩn số #4 (`ask` có thật hỏi không) vẫn chưa đóng bằng quan sát trực tiếp một lượt `ask`, nhưng rủi ro đã đổi hẳn: từ "chế độ có lẽ chặn ask" thành "chế độ chính là chế độ hỏi".
+
+7. **`repo` và `branch` là `null` trong phiên Codex THẬT.** Phát hiện ngoài dự kiến từ chính entry trên. Các entry trước đó có `repo`/`branch` đầy đủ đều là probe của tôi chạy với cwd = thư mục repo. Trong phiên thật, `findProjectRoot(ctx.cwd)` trả null.
+
+   **Đây chặn §5.3 và một dòng của §4:** `deploy.branch-mismatch` dựa hoàn toàn vào `currentBranch()`. Nếu branch là null trong phiên thật thì rule đó không quyết định được gì, và cả cột "branch — guardrail đảm bảo" trong bảng §4 sụp.
+
+   Cần biết: Codex gửi `cwd` là gì (thư mục dự án, hay thư mục khác), và vì sao không tìm được `.git`. Trước khi trả lời được, KHÔNG được coi branch là thông tin guardrail nắm chắc.
