@@ -1388,7 +1388,7 @@ Task cuối vì nó kiểm điều duy nhất unit test không kiểm được.
 
 **Interfaces:** không có API mới.
 
-- [ ] **Step 1: Ghi 12 giới hạn §9 vào README**
+- [x] **Step 1: Ghi 12 giới hạn §9 vào README**
 
 Không che một mục nào. Đặc biệt ba mục dễ bị bỏ:
 
@@ -1396,7 +1396,7 @@ Không che một mục nào. Đặc biệt ba mục dễ bị bỏ:
 - #10: `bash ./deploy.sh` được bịt ở Task 1, nhưng danh sách trình thông dịch **không thể đầy đủ** — `perl -e`, một wrapper tự viết trong repo vẫn gọi được script
 - #11: `netlify`/`firebase`/`railway` chặn theo subcommand nên **một subcommand publish mới sẽ lọt** cho tới khi có người thêm pattern, và `doctor` không phát hiện được thiếu sót kiểu này
 
-- [ ] **Step 2: Test README**
+- [x] **Step 2: Test README**
 
 ```js
 test('README ghi đủ giới hạn của nhóm deploy', () => {
@@ -1436,7 +1436,7 @@ Ba kết quả, ba hành động:
 
 Ghi **quan sát**, không ghi suy luận. Nếu chưa chạy được lượt thật thì §11.4 vẫn mở, và README **phải** viết "thiết kế để hỏi", không phải "sẽ hỏi".
 
-- [ ] **Step 6: Đo lại độ trễ**
+- [x] **Step 6: Đo lại độ trễ**
 
 Run: `node --test tests/latency.test.mjs`
 Expected: p95 < 150ms, và phần dôi của đường allow không tăng so với baseline 27.8ms.
