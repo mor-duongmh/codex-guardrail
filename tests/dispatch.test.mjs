@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runHook, denyMessage } from '../lib/dispatch.mjs';
@@ -228,4 +228,29 @@ test('thiếu codex-guardrail.json thì KHÔNG cảnh báo ra stderr', () => {
   // và dev học cách bỏ qua stderr của guardrail. `guardrail doctor` báo việc này.
   const r = runHook(payload(repo(), 'npm test'), {});
   assert.equal(r.stderr, '');
+});
+
+// Mắt nối cuối: ctx CÓ permissionMode (lib/context.mjs) và audit GHI ĐƯỢC nó
+// (lib/audit.mjs), nhưng vô nghĩa nếu dispatch không truyền qua. Test này tồn tại
+// vì hai test kia đều xanh mà chuỗi vẫn có thể hở đúng ở giữa.
+test('dispatch ghi permissionMode vào audit log', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'guardrail-disp-pm-'));
+  const auditPath = join(dir, 'audit.jsonl');
+  const ev = JSON.stringify({
+    hook_event_name: 'PreToolUse', tool_name: 'Bash',
+    tool_input: { command: 'psql -l' }, cwd: process.cwd(),
+    permission_mode: 'bypassPermissions',
+  });
+  const prev = process.env.GUARDRAIL_AUDIT_PATH;
+  process.env.GUARDRAIL_AUDIT_PATH = auditPath;
+  try {
+    runHook(ev, { env: {} });
+    const e = JSON.parse(readFileSync(auditPath, 'utf8').trim().split('\n').at(-1));
+    assert.equal(e.decision, 'denied');
+    assert.equal(e.permissionMode, 'bypassPermissions',
+      'dispatch không truyền permissionMode từ ctx vào audit entry');
+  } finally {
+    if (prev === undefined) delete process.env.GUARDRAIL_AUDIT_PATH;
+    else process.env.GUARDRAIL_AUDIT_PATH = prev;
+  }
 });
