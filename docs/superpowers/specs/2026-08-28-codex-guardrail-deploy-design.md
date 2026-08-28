@@ -209,6 +209,35 @@ Mười công cụ lọt ở §2.1 được xử bằng **dữ liệu policy** (
 
 **Thứ tự trong REGISTRY:** `deploy` chạy **trước** `infra`. Lý do: `vercel --prod` bị cả hai bắt, và ruleId được báo là ruleId người dùng sẽ gõ để escape. `deploy.direct-tool` nói "hãy dùng script", còn `infra.deny-binary` chỉ nói "binary bị chặn" — cái đầu hành động được, cái sau không.
 
+### 5.5b `deploy.undeclared-destination` — `PreToolUse: Bash` — quyết định `ask`
+
+Nhóm B (`scp`, `rsync`, `ssh`, `curl`) **không chặn** — dev dùng hằng ngày. Thay vào đó **hỏi** trước khi chạy.
+
+Nhưng hỏi mọi lần dùng bốn công cụ đó là sai: chúng không hiếm, nên nó sinh prompt fatigue và **huấn luyện dev bấm qua cả confirm deploy** (§3.9). Điều kiện hỏi phải hẹp hơn nhiều, theo HAI tín hiệu:
+
+**1. Đích chưa được khai.** Không phải "dùng curl" mà "curl tới host không có trong danh sách".
+
+**2. Lệnh ĐẨY dữ liệu ra, không phải lấy dữ liệu về.** Đây là tín hiệu giảm số prompt nhiều nhất, vì tải-về là việc thường xuyên còn đẩy-lên thì hiếm:
+
+| Chiều | Ví dụ | Hỏi? |
+|---|---|---|
+| lấy về | `curl https://x`, `scp remote:file .`, `rsync remote:d ./` | không |
+| đẩy lên | `curl -X POST --data-binary @dist.zip`, `curl -F`, `curl -T` | **hỏi** |
+| đẩy lên | `scp ./dist host:/var/www`, `rsync ./dist host:/var/www` | **hỏi** |
+| chạy lệnh từ xa | `ssh host "..."` | **hỏi** — không phải đọc |
+
+Nhận diện chiều: với `scp`/`rsync`, tham số ĐÍCH (cuối) có dạng `host:path` thì là đẩy lên; với `curl`, có `-X POST|PUT`, `-d`/`--data*`, `-F`, `-T`/`--upload-file` thì là đẩy lên. Tách host dùng lại đúng đường đã có — `infra.ssh-deny-host` đã bóc được host từ cả `ssh` lẫn `scp` (đo ở §2.2).
+
+```
+⚠ guardrail hỏi: deploy.undeclared-destination
+
+  Lệnh này ĐẨY dữ liệu tới 1.2.3.4 — host không có trong danh sách đã khai.
+  Đích đã khai: staging.acme.internal, prod-1.acme.internal
+  Xác nhận đây là chỗ bạn muốn gửi tới?
+```
+
+**Ở chế độ bỏ qua quyền, `ask` hạ về `deny`** (§3.9). Nghĩa là nhóm B chuyển từ "hỏi" sang "chặn" trong đúng những phiên mà prompt không có ai bấm — bao gồm phiên không người trực. Đây là ma sát thật, ghi ở §9.9.
+
 ### 5.6 `deploy.target.<name>` — đích hệ quả cao đòi người xác nhận
 
 Đây là **cửa lùi** khi `ask` không dùng được (§3.9): ở chế độ bỏ qua quyền, prompt của Codex không đáng tin nên xác nhận phải đi qua kênh mà agent không với tới được.
@@ -316,7 +345,9 @@ Ngoài đường nóng, `doctor` resolve `name` của target trong `~/.ssh/confi
 
 7. **`ask` chỉ đáng tin khi có người thật trả lời.** Nếu phiên chạy ở chế độ bỏ qua quyền, hoặc chạy không người trực (cron, CI, agent nền), thì prompt không có ai bấm. Guardrail hạ về `deny` trong trường hợp đó (§3.9), nghĩa là **deploy không chạy được trong phiên không người trực** — đó là hành vi đúng cho một hành động không hoàn tác được, nhưng phải nói ra vì nó là ma sát thật.
 
-8. **Thứ mạnh nhất không phải guardrail.** Nếu deploy token không nằm trên máy dev thì AI đoán gì cũng không deploy được. Deploy từ CI với protected environment. Guardrail không thay được điều đó, và tài liệu không được ngụ ý là thay được.
+8. **Nhóm B chuyển từ "hỏi" sang "chặn" trong phiên không người trực.** Hệ quả của §3.9: ở chế độ bỏ qua quyền hoặc phiên không có người, `scp`/`rsync`/`ssh`/`curl` đẩy dữ liệu tới host chưa khai sẽ bị CHẶN chứ không hỏi. Đúng hướng an toàn, nhưng nghĩa là một script CI dùng `rsync` tới host chưa khai sẽ vỡ — phải khai host đó, hoặc chạy ngoài Codex.
+
+9. **Thứ mạnh nhất không phải guardrail.** Nếu deploy token không nằm trên máy dev thì AI đoán gì cũng không deploy được. Deploy từ CI với protected environment. Guardrail không thay được điều đó, và tài liệu không được ngụ ý là thay được.
 
 ---
 
@@ -341,10 +372,10 @@ Ngoài các nguyên tắc đã có (§14 spec chính), nhóm này bắt buộc:
 
    - `docker push`: **team không dùng bao giờ.** Bịt bằng `denyPatterns: ['docker\\s+push\\b']`, đã đo ở §2.6 — 4/4 chặn, 10/10 lệnh docker hằng ngày vẫn qua. Zero code.
    - **Nhóm A, đề xuất chặn cứng qua `denyBinaries`** (chờ bạn phủ quyết): `surge`, `gh-pages`, `netlify`, `firebase`, `railway`. Lý do coi là an toàn để chặn: chúng chỉ dùng để publish ra hosting công khai, không có công dụng local nào; và `surge`/`gh-pages` đúng là ca "domain free" ở §1.
-   - **Nhóm B, KHÔNG chặn cứng được:** `scp`, `rsync`, `ssh`, `curl`. Dev dùng hằng ngày. Chúng phải đi qua phễu-entrypoint (§5.5) chứ không qua denylist.
+   - **Nhóm B — ĐÃ CHỐT 2026-08-28: KHÔNG chặn, mà HỎI.** `scp`, `rsync`, `ssh`, `curl`. Cơ chế ở §5.5b: chỉ hỏi khi đích chưa khai VÀ lệnh đẩy dữ liệu ra. Hai điều kiện đó giữ số prompt thấp, vì tải-về thường xuyên còn đẩy-lên hiếm.
 
 
-4. **`ask` có thật sự hỏi dưới `permission_mode: "bypassPermissions"` không?** ẨN SỐ CHẶN THIẾT KẾ. Mọi payload thật Task 0 bắt được đều ở chế độ đó. Cần một spike đúng kiểu Task 0: phát `permissionDecision: "ask"` từ hook, chạy lệnh thật trong Codex, xem có prompt hay tự chạy. Ba kết quả, ba thiết kế khác nhau:
+4. **`ask` có thật sự hỏi dưới `permission_mode: "bypassPermissions"` không?** ẨN SỐ CHẶN THIẾT KẾ, và mức nghiêm trọng đã TĂNG sau quyết định không chặn nhóm B: trước đây nó chỉ ảnh hưởng UX của confirm deploy; giờ nó quyết định nhóm B **có được bảo vệ hay không**. Nếu `ask` không hỏi và ta cũng không chặn, `scp`/`rsync`/`ssh`/`curl` tới host lạ là lỗ hoàn toàn hở. Mọi payload thật Task 0 bắt được đều ở chế độ đó. Cần một spike đúng kiểu Task 0: phát `permissionDecision: "ask"` từ hook, chạy lệnh thật trong Codex, xem có prompt hay tự chạy. Ba kết quả, ba thiết kế khác nhau:
    - Có hỏi → `ask` là cơ chế chính, `requireHumanEscape` chỉ còn cho phiên không người trực.
    - Tự duyệt → `ask` VÔ DỤNG ở chế độ này; `requireHumanEscape` là cơ chế duy nhất, và phải ghi vào README rằng confirm không khả dụng khi chạy bypassPermissions.
    - Coi là hook lỗi → tuyệt đối không dùng `ask`, vì theo Task 0 hook lỗi = CHO LỆNH CHẠY.
