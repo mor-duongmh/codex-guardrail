@@ -1,7 +1,7 @@
 # codex-guardrail — nhóm rule `deploy.*`
 
 **Ngày:** 2026-08-28
-**Trạng thái:** chờ review
+**Trạng thái:** §11 đã đóng hết — sẵn sàng lập plan. Còn một rủi ro dư chưa đóng bằng quan sát: `ask` chưa từng thấy đi hết một vòng trong Codex (§11.4).
 **Bổ sung cho:** [2026-08-25-codex-guardrail-design.md](2026-08-25-codex-guardrail-design.md) — §6 (đặc tả rule), §7 (ba tầng), §8 (policy), §15 (giới hạn)
 
 ---
@@ -29,6 +29,8 @@ Mọi số dưới đây đo trên engine tại `d0ccc88`, không phải phỏng
 **Lọt hoàn toàn:** `netlify deploy --prod`, `firebase deploy`, `surge ./dist my-app.surge.sh`, `railway up`, `docker push docker.io/me/app`, `npx gh-pages -d dist`, `scp -r dist deploy@1.2.3.4:/var/www`, `rsync -avz dist deploy@1.2.3.4:/var/www`, `ssh deploy@1.2.3.4 "./deploy.sh"`, `curl -X POST https://... --data-binary @dist.zip`.
 
 `git push heroku main` **có** bị chặn nhưng **tình cờ**: `git.protected-branch` bắt vì refspec chứa `main`, không vì đích là heroku.
+
+**Xử lý 10 mục lọt (chốt 2026-08-28):** 6 mục đầu bịt bằng dữ liệu policy — `surge`/`gh-pages` vào `denyBinaries`, `netlify deploy`/`firebase deploy`/`railway up`/`docker push` vào `denyPatterns` (§6.0, đo ở §11.3 và §2.6). 4 mục còn lại (`scp`/`rsync`/`ssh`/`curl`) **không chặn mà hỏi** — §5.7.
 
 **Kết luận:** thêm binary vào denylist là trận thua. Tập công cụ deploy là mở; cùng một binary vừa an toàn vừa nguy hiểm tuỳ subcommand (đo được: `wrangler dev`, `vercel dev`, `npx wrangler dev` — server dev local vô hại — **đều bị chặn cứng**, đây chính là ma sát khiến dev tháo guardrail); và deploy đi qua được `ssh`/`scp`/`rsync`/`curl`/`git push`, những thứ không bao giờ cấm được.
 
@@ -215,8 +217,51 @@ Guardrail không cần *hiểu* deploy. Nó đảm bảo: **có chỉ định r�
 
 Nhóm `deploy` là **rule an toàn** (§10 spec chính): ném exception thì fail-closed.
 
+### 5.0 Cách khớp entrypoint và bóc target — dùng chung cho §5.2–§5.4
+
+**Khớp entrypoint:** tiền tố của `effectiveArgv(segment.argv)`, cùng ngữ nghĩa với `infra.denyPatterns` và `deploy.denyDirect` (§5.6) — không sinh thêm kiểu khớp thứ hai. Phải là **tiền tố nhiều token**, không phải `argv[0]`: `npm run deploy -- prod` cho argv `["npm","run","deploy","--","prod"]` (đo 2026-08-28), nên entrypoint `npm run deploy` chỉ khớp được bằng tiền tố.
+
+**Bóc target: quét TOÀN BỘ argv sau entrypoint, không quan tâm vị trí hay cờ.** Mỗi token, so cả token nguyên và phần sau dấu `=` đầu tiên với `name` của các target đã khai. Số target khớp được là 0 → §5.2, đúng 1 → §5.3/§5.5, nhiều hơn 1 → §5.4.
+
+Đo trên các dạng gọi thật (2026-08-28):
+
+| Lệnh | argv hữu hiệu sau entrypoint | Token khớp `prod` |
+|---|---|---|
+| `./deploy.sh prod` | `prod` | ✓ |
+| `./deploy.sh --env=prod` | `--env=prod` | ✓ (sau `=`) |
+| `./deploy.sh --env prod` | `--env`, `prod` | ✓ |
+| `make deploy ENV=prod` | `ENV=prod` | ✓ (sau `=`) |
+| `./deploy.sh --dry-run prod` | `--dry-run`, `prod` | ✓ |
+| `./deploy.sh --config prod.json` | `--config`, `prod.json` | — không khớp, đúng |
+| `./deploy.sh` | *(rỗng)* | — → §5.2 |
+| `./deploy.sh staging prod` | `staging`, `prod` | 2 → §5.4 |
+
+**Đây là lý do §11.1 đóng được mà KHÔNG cần `targetArg` trong schema.** Câu hỏi "vị trí hay cờ" chỉ có nghĩa với một bộ bóc theo vị trí; quét cả argv làm nó không còn là câu hỏi, và phủ luôn dạng `ENV=prod` của Makefile mà cả hai lựa chọn `"positional" | "--env"` đều bỏ sót. Một trường schema ít hơn là một trường mỗi dự án không phải khai đúng.
+
+**So khớp là chính xác cả token, không phải chứa.** Token `prod.json` không khớp target `prod`. Ca mơ hồ lệch về phía `deploy.no-target`/`undeclared-target` (chặn), không về phía cho qua.
+
+#### 5.0.1 Lỗ vừa đo được: gọi entrypoint qua trình thông dịch
+
+Đo cùng lượt trên (2026-08-28), `effectiveArgv` KHÔNG bóc trình thông dịch shell:
+
+| Lệnh | argv hữu hiệu | Khớp entrypoint `./scripts/deploy.sh`? |
+|---|---|---|
+| `bash scripts/deploy.sh prod` | `bash`, `scripts/deploy.sh`, `prod` | **KHÔNG** |
+| `sh ./deploy.sh prod` | `sh`, `./deploy.sh`, `prod` | **KHÔNG** |
+| `source ./deploy.sh prod` | `source`, `./deploy.sh`, `prod` | **KHÔNG** |
+| `env TARGET=prod ./deploy.sh` | `./deploy.sh` | có — `env` đã được bóc |
+| `cd frontend && ./deploy.sh prod` | segment 2: `./deploy.sh`, `prod` | có — quét theo segment |
+
+Ba dạng đầu **đi vòng toàn bộ nhóm `deploy`**: không khớp entrypoint thì không rule nào trong nhóm chạy, và lệnh được cho qua. Đây là lỗ hở thật, không phải ma sát.
+
+**Cách bịt: thêm `bash`, `sh`, `zsh`, `source`, `.` vào `WRAPPERS` trong `lib/argv.mjs`** — một chỗ, không phải một bộ bóc riêng cho deploy. Lý do chọn sửa chỗ dùng chung:
+
+- Bóc wrapper chỉ **phơi ra** lệnh thật, nên nó chỉ có thể làm rule cưỡng chế NHIỀU hơn, không thể làm cho qua nhiều hơn. Với 4 nhóm deny-list đang có, hướng đó là hướng đúng.
+- Dạng `-c` không đổi gì: `bash -c "psql -l"` hôm nay cho `basename` là `bash`, sau khi sửa cho `"psql -l"` — cả hai đều không khớp `psql`. Lỗ `-c` là lỗ riêng, đã ghi ở §15 spec chính, và mục này không tuyên bố bịt nó.
+
+**Bắt buộc:** thay đổi này chạm 4 nhóm rule đang có, nên phải chạy TOÀN BỘ suite (409 test lúc chốt spec) chứ không chỉ test của deploy, và phải có test cho từng dạng trong bảng trên.
+
 ### 5.1 `deploy.no-project-root` — `PreToolUse: Bash`
-`deploy.no-project-root` — `PreToolUse: Bash`
 
 Lệnh khớp một entrypoint (hoặc khớp `denyDirect`) nhưng `ctx.projectRoot` là null.
 
@@ -233,9 +278,10 @@ Phải là ruleId RIÊNG, không dồn vào `deploy.undeclared-target`: nguyên 
 Rule này chạy TRƯỚC `deploy.no-target` và `deploy.undeclared-target`: không biết dự án thì hai câu hỏi kia vô nghĩa.
 
 ### 5.2 `deploy.no-target` — `PreToolUse: Bash`
-`deploy.no-target` — `PreToolUse: Bash`
 
-Lệnh khớp một `deploy.entrypoints` nhưng **không có tham số target nào**. Đây là rule trả lời trực tiếp §1: *chưa chỉ định = chặn.*
+Lệnh khớp một `deploy.entrypoints` (§5.0) nhưng **không token nào khớp một target đã khai**. Đây là rule trả lời trực tiếp §1: *chưa chỉ định = chặn.*
+
+Lưu ý: "không có target" ≠ "không có tham số". `./deploy.sh --dry-run` có tham số nhưng không có target, và nó phải bị chặn ở mục này.
 
 ```
 ✗ guardrail chặn: deploy.no-target
@@ -248,14 +294,22 @@ Lệnh khớp một `deploy.entrypoints` nhưng **không có tham số target n�
 Chỉ bật khi `requireExplicitTarget: true` (mặc định `true`).
 
 ### 5.3 `deploy.undeclared-target` — `PreToolUse: Bash`
-`deploy.undeclared-target` — `PreToolUse: Bash`
-
-Lệnh khớp entrypoint và **có** tham số, nhưng tham số đó không khớp `name` của bất kỳ target nào.
 
 Message phải **liệt kê các target đã khai**. Đó là thứ biến câu hỏi mở thành câu hỏi đóng, tức là phần giải quyết §1.
 
+**Trùng lối với §5.2 là có chủ ý.** Với cách bóc ở §5.0 (đếm số target khớp: 0 / 1 / >1), "có tham số nhưng tham số lạ" và "không có tham số nào" đều cho số khớp là 0 — guardrail **không phân biệt được** `./deploy.sh` với `./deploy.sh xyz`. Hai ruleId vẫn tách vì hint khác nhau, nên tín hiệu để chọn là **argv sau entrypoint có rỗng hay không**:
+
+| Lệnh | Số target khớp | ruleId |
+|---|---|---|
+| `./deploy.sh` | 0, argv rỗng | `deploy.no-target` |
+| `./deploy.sh --dry-run` | 0, argv KHÔNG rỗng | `deploy.no-target` — xem §5.2 |
+| `./deploy.sh xyz` | 0, argv KHÔNG rỗng | `deploy.undeclared-target` |
+
+Hai dòng giữa xung đột: cả hai đều là "0 khớp, argv không rỗng". Phân biệt bằng **có token nào không bắt đầu bằng `-`** — `--dry-run` thì không, `xyz` thì có. Đây là heuristic, không phải suy luận chắc chắn, và nó **không ảnh hưởng quyết định** (cả hai đều chặn) — chỉ ảnh hưởng câu hint và ruleId người dùng gõ để escape. Ghi ra vì một heuristic không ghi ra là một heuristic sẽ bị người sau tưởng là định lý.
+
+Cũng vì thế `./deploy.sh $TARGET` rơi vào `deploy.undeclared-target` (§9 #4): `$TARGET` không bắt đầu bằng `-`.
+
 ### 5.4 `deploy.ambiguous-target` — `PreToolUse: Bash`
-`deploy.ambiguous-target` — `PreToolUse: Bash`
 
 Lệnh khớp entrypoint và nêu **nhiều hơn một** target đã khai (`./deploy.sh staging prod`).
 
@@ -271,7 +325,6 @@ Lệnh khớp entrypoint và nêu **nhiều hơn một** target đã khai (`./de
 Không có target nào thì là `deploy.no-target` (§5.2); nhiều hơn một thì là mục này. Nghĩa là entrypoint chỉ chạy với **đúng một** target.
 
 ### 5.5 `deploy.branch-mismatch` — `PreToolUse: Bash`
-`deploy.branch-mismatch` — `PreToolUse: Bash`
 
 Target khai hợp lệ, nhưng branch hiện tại không khớp `branches` của **chính target đó**. So bằng `globToRegExp` (đã có) nên `release/*` hoạt động.
 
@@ -280,7 +333,6 @@ Chỉ có ĐÚNG MỘT target mỗi lệnh (§11.2 đã chốt: deploy tuần t�
 **Ràng buộc latency:** chỉ gọi `currentBranch()` khi lệnh ĐÃ khớp một entrypoint. Deploy là việc hiếm, còn hook chạy trên mọi tool call — spawn `git` trên đường allow là trả phí cho việc không xảy ra. Cùng nếp với `git.*` (Task 10: `currentBranch` chỉ gọi trên nhánh deny/escaped).
 
 ### 5.6 `deploy.direct-tool` — `PreToolUse: Bash`
-`deploy.direct-tool` — `PreToolUse: Bash`
 
 Lệnh dùng công cụ deploy trực tiếp thay vì đi qua entrypoint. Nhận diện **không theo tên binary cứng trong code** (§3.1) mà theo `deploy.denyDirect` — mảng regex do dự án khai, mặc định `[]` — cộng phần `infra.denyBinaries` đã chặn 9 công cụ ở §2.1.
 
@@ -291,7 +343,6 @@ Mười công cụ lọt ở §2.1 được xử bằng **dữ liệu policy** (
 **Thứ tự trong REGISTRY:** `deploy` chạy **trước** `infra`. Lý do: `vercel --prod` bị cả hai bắt, và ruleId được báo là ruleId người dùng sẽ gõ để escape. `deploy.direct-tool` nói "hãy dùng script", còn `infra.deny-binary` chỉ nói "binary bị chặn" — cái đầu hành động được, cái sau không.
 
 ### 5.7 `deploy.undeclared-destination` — `PreToolUse: Bash` — quyết định `ask`
-`deploy.undeclared-destination` — `PreToolUse: Bash` — quyết định `ask`
 
 Nhóm B (`scp`, `rsync`, `ssh`, `curl`) **không chặn** — dev dùng hằng ngày. Thay vào đó **hỏi** trước khi chạy.
 
@@ -321,7 +372,6 @@ Nhận diện chiều: với `scp`/`rsync`, tham số ĐÍCH (cuối) có dạng
 **Ở chế độ bỏ qua quyền, `ask` hạ về `deny`** (§3.9). Nghĩa là nhóm B chuyển từ "hỏi" sang "chặn" trong đúng những phiên mà prompt không có ai bấm — bao gồm phiên không người trực. Đây là ma sát thật, ghi ở §9.9.
 
 ### 5.8 `deploy.target.<name>` — đích hệ quả cao đòi người xác nhận
-`deploy.target.<name>` — đích hệ quả cao đòi người xác nhận
 
 Đây là **cửa lùi** khi `ask` không dùng được (§3.9): ở chế độ bỏ qua quyền, prompt của Codex không đáng tin nên xác nhận phải đi qua kênh mà agent không với tới được.
 
@@ -340,7 +390,6 @@ ruleId phải chứa tên target, không dùng chung một `deploy.high-conseque
 Quyết định escaped vẫn được ghi audit (`decision: 'escaped'`), nên một lần deploy prod do người mở vẫn để lại vết.
 
 ### 5.9 `deploy.script` — dự án tự khai, không phải rule của plugin
-`deploy.script` — dự án tự khai, không phải rule của plugin
 
 Bảo vệ script bằng `selfProtect.protectedPaths` (§2.4). Plugin **không** ship nhóm này; `init` sinh nó vào file dự án.
 
@@ -368,6 +417,30 @@ Bảo vệ script bằng `selfProtect.protectedPaths` (§2.4). Plugin **không**
 ```
 
 **Không có `hosts` và `ssh`** — theo §3.3 chúng ở trong script.
+
+**Không có `targetArg`** — §11.1 đóng bằng cách bóc target không phụ thuộc vị trí (§5.0), nên trường đó không tồn tại.
+
+### 6.0 Phần nhóm A vào `infra`, không vào `deploy`
+
+Quyết định §11.3 hiện ra trong `policy/default.json` như dữ liệu của nhóm `infra` đang có, **không** thêm cấu trúc mới:
+
+```json
+{
+  "infra": {
+    "denyBinaries": ["...21 mục đang có...", "surge", "gh-pages"],
+    "denyPatterns": ["...5 mục đang có...",
+      "netlify\\s+deploy(?![\\w-])",
+      "firebase\\s+deploy(?![\\w-])",
+      "railway\\s+up(?![\\w-])",
+      "docker\\s+push(?![\\w-])"
+    ]
+  }
+}
+```
+
+Zero code — cả hai trường đã được `infra.mjs` đọc. Nhưng theo §6.1, mọi mục ở đây là **không thể xoá bởi dự án**, nên mỗi mục phải chịu được phép thử "một lệnh local hằng ngày có bị chặn oan không". Số đo cho 3 pattern netlify/firebase/railway: 8/8 publish chặn, 12/12 local qua (§11.3). Cho `docker push`: 4/4 và 10/10 (§2.6).
+
+`(?![\w-])` không phải trang trí: nó là thứ giữ `netlify deploying-notes.md` không bị coi là `netlify deploy`.
 
 ### 6.1 Ràng buộc bắt buộc về mặc định
 
@@ -434,7 +507,11 @@ Ngoài đường nóng, `doctor` resolve `name` của target trong `~/.ssh/confi
 
 9. **`deploy.*` vô hiệu hoàn toàn khi mở Codex ngoài thư mục dự án** (§2.7). Không phải "giảm bảo vệ" mà là "chặn tất cả": allow-list không có dữ liệu thì không có đích nào hợp lệ. Đó là hướng an toàn, nhưng nghĩa là thói quen mở Codex từ home làm nhóm này thành một bức tường thay vì một cổng — và team phải đổi thói quen, không phải guardrail nới ra.
 
-10. **Thứ mạnh nhất không phải guardrail.** Nếu deploy token không nằm trên máy dev thì AI đoán gì cũng không deploy được. Deploy từ CI với protected environment. Guardrail không thay được điều đó, và tài liệu không được ngụ ý là thay được.
+10. **Gọi entrypoint qua trình thông dịch đi vòng cả nhóm.** `bash ./deploy.sh prod` / `sh ...` / `source ...` không khớp entrypoint nào (đo ở §5.0.1). §5.0.1 bịt ba dạng đó bằng cách thêm chúng vào `WRAPPERS`, nhưng danh sách trình thông dịch **không thể đầy đủ** — `perl -e`, `python -c`, một wrapper tự viết trong repo đều gọi được script mà không khớp tiền tố nào. Cùng bản chất với §15 #4 spec chính: tầng 1 chặn đường mặc định, không chặn người quyết tâm.
+
+11. **Chặn `netlify`/`firebase`/`railway` ở mức subcommand, không mức binary** (§11.3). Nghĩa là `netlify deploy` bị chặn còn `netlify dev` qua — chủ ý, để không biến một lệnh hằng ngày thành escape từng phiên. Cái giá: một subcommand publish mới hoặc đổi tên (`netlify deploy` → dạng khác) sẽ **lọt cho tới khi có người thêm pattern**. Deny-list theo subcommand không tự phủ tương lai, và `guardrail doctor` không phát hiện được thiếu sót kiểu này.
+
+12. **Thứ mạnh nhất không phải guardrail.** Nếu deploy token không nằm trên máy dev thì AI đoán gì cũng không deploy được. Deploy từ CI với protected environment. Guardrail không thay được điều đó, và tài liệu không được ngụ ý là thay được.
 
 ---
 
@@ -453,12 +530,38 @@ Ngoài các nguyên tắc đã có (§14 spec chính), nhóm này bắt buộc:
 
 ## 11. Ẩn số cần làm rõ trước khi code
 
-1. **Script nhận target qua tham số vị trí hay cờ?** `./deploy.sh prod` hay `./deploy.sh --env=prod`. Ảnh hưởng cách bóc target ở §5.3. Mỗi dự án một kiểu thì có thể cần khai thêm, ví dụ `targetArg: "positional" | "--env"`.
+1. ~~Script nhận target qua tham số vị trí hay cờ?~~ **ĐÃ ĐÓNG 2026-08-28: câu hỏi không cần trả lời.** Chỉ định là *chặn khi chưa nêu đích*, và cách bóc đạt được điều đó mà không cần biết dạng: **quét toàn bộ argv, so cả token nguyên và phần sau `=`** (§5.0). Phủ được cả 4 dạng (`prod`, `--env=prod`, `--env prod`, `ENV=prod`), nên **schema KHÔNG có `targetArg`** — một trường ít hơn là một trường mỗi dự án không khai sai được.
+
+   Đo cùng lượt lại lộ ra một lỗ chưa ai hỏi tới: `bash ./deploy.sh prod` không khớp entrypoint nào, tức đi vòng cả nhóm `deploy`. Ghi ở §5.0.1 kèm cách bịt, và ở §9 #11.
 2. ~~Có dự án nào deploy nhiều target trong một lệnh không?~~ **ĐÃ CHỐT 2026-08-28: deploy TUẦN TỰ, mỗi lệnh một đích.** Hệ quả: §5.5 không cần vòng lặp, và lệnh nhiều đích bị `deploy.ambiguous-target` chặn (§5.4).
 3. **Mười công cụ lọt ở §2.1 — cái nào team đang dùng hợp lệ?** Đã chốt một phần 2026-08-28:
 
    - `docker push`: **team không dùng bao giờ.** Bịt bằng `denyPatterns: ['docker\\s+push\\b']`, đã đo ở §2.6 — 4/4 chặn, 10/10 lệnh docker hằng ngày vẫn qua. Zero code.
-   - **Nhóm A, đề xuất chặn cứng qua `denyBinaries`** (chờ bạn phủ quyết): `surge`, `gh-pages`, `netlify`, `firebase`, `railway`. Lý do coi là an toàn để chặn: chúng chỉ dùng để publish ra hosting công khai, không có công dụng local nào; và `surge`/`gh-pages` đúng là ca "domain free" ở §1.
+   - **Nhóm A — ĐÃ CHỐT 2026-08-28: CHẶN, nhưng hai mức khác nhau.** Lý do coi là an toàn để chặn: `surge`/`gh-pages` đúng là ca "domain free" ở §1. Nhưng lý do tôi từng nêu — "không có công dụng local nào" — **sai với 2 trong 5 công cụ**, và số đo bắt được:
+
+     ```
+     surge      (chưa cài)
+     gh-pages   (chưa cài)
+     netlify    /Users/haiduong/.nvm/versions/node/v20.19.2/bin/netlify
+     firebase   /Users/haiduong/.nvm/versions/node/v20.19.2/bin/firebase
+     railway    (chưa cài)
+     ```
+
+     `netlify` và `firebase` **đã cài trên máy lead**, tức đang được dùng. Và cả hai đều có chế độ local dùng hằng ngày (`netlify dev`, `firebase emulators:start`, `firebase login`). Chặn ở mức binary sẽ chặn luôn những lệnh đó — đúng lớp ma sát đã đo được với `wrangler dev` và `vercel dev`.
+
+     Nên chia theo **công cụ có chế độ local hay không**:
+
+     | Công cụ | Mức chặn | Vì sao |
+     |---|---|---|
+     | `surge` | `denyBinaries` | gọi trần `surge` là deploy luôn — không có chế độ local để giữ |
+     | `gh-pages` | `denyBinaries` | chỉ có một việc: đẩy lên `gh-pages` |
+     | `netlify` | `denyPatterns: netlify\s+deploy(?![\w-])` | giữ `dev`, `link`, `env:list`, `status` |
+     | `firebase` | `denyPatterns: firebase\s+deploy(?![\w-])` | giữ `emulators:start`, `login`, `projects:list`, `init` |
+     | `railway` | `denyPatterns: railway\s+up(?![\w-])` | giữ `logs`, `run`, `status` |
+
+     Đo 3 pattern trên (2026-08-28): **8/8 lệnh publish bị chặn** (gồm dạng bọc `npx netlify deploy --prod --dir=dist` và `sudo railway up`), **12/12 lệnh local qua được**. Cùng khuôn và cùng mức bằng chứng như `docker push` ở §2.6 — zero code, chỉ thêm dữ liệu policy.
+
+     **Vì sao không chặn cứng cả 5 cho gọn:** `mergePolicy` HỢP mảng (§2.3), nên thứ gì vào `denyBinaries` của bản mặc định thì **không dự án nào xoá được, mãi mãi**. Với `psql`/`aws` đó là chủ ý. Với `netlify dev` thì đó là một lệnh hằng ngày phải escape từng phiên đến hết đời dự án — và một guardrail như thế bị dev tháo, đúng chế độ hỏng tệ nhất ở §1.
    - **Nhóm B — ĐÃ CHỐT 2026-08-28: KHÔNG chặn, mà HỎI.** `scp`, `rsync`, `ssh`, `curl`. Cơ chế ở §5.7: chỉ hỏi khi đích chưa khai VÀ lệnh đẩy dữ liệu ra. Hai điều kiện đó giữ số prompt thấp, vì tải-về thường xuyên còn đẩy-lên hiếm.
 
 
@@ -467,7 +570,14 @@ Ngoài các nguyên tắc đã có (§14 spec chính), nhóm này bắt buộc:
    - Tự duyệt → `ask` VÔ DỤNG ở chế độ này; `requireHumanEscape` là cơ chế duy nhất, và phải ghi vào README rằng confirm không khả dụng khi chạy bypassPermissions.
    - Coi là hook lỗi → tuyệt đối không dùng `ask`, vì theo Task 0 hook lỗi = CHO LỆNH CHẠY.
 
-   Cho tới khi đo, thiết kế giả định kết quả xấu nhất.
+   **ĐÃ CHỐT 2026-08-28: đi tiếp với `ask` là cơ chế chính, KHÔNG chờ spike.** Cơ sở là #6 bên dưới: chế độ thật của máy dev là `default`, và `dontAsk` tồn tại như một chế độ RIÊNG — nếu `default` cũng không hỏi thì `dontAsk` không có lý do tồn tại.
+
+   Điều này **không** đóng ẩn số bằng quan sát trực tiếp, và spec không được nói là đã đóng. Cụ thể phần chưa biết: chưa từng thấy một lượt `ask` đi hết vòng và Codex hiện prompt. Nên hai thứ vẫn bắt buộc:
+
+   - **Nhánh hạ `ask` → `deny`** ở chế độ `dontAsk`/`bypassPermissions` (§3.9) vẫn phải code, vẫn phải có test. Nó là đường phòng bị, không phải đường chính.
+   - **Test đầu tiên chạm `ask` phải là một lượt thật trong Codex**, không phải chỉ unit test `runHook`. Nếu Codex coi `ask` là hook lỗi thì theo Task 0, hook lỗi = CHO LỆNH CHẠY — tức nhóm B từ "hỏi" thành "hở hoàn toàn", và unit test sẽ xanh trong khi thực tế hở. Đây là đúng lớp lỗi mà cả dự án tồn tại để chống, nên nó không được kiểm bằng mock.
+
+   Cho tới lượt thật đó, mọi tuyên bố trong README về confirm nhóm B phải viết ở dạng "thiết kế để hỏi", không phải "sẽ hỏi".
 
 5. ~~Tên chính xác của các chế độ `permission_mode`.~~ **ĐÃ CHỐT 2026-08-28** từ JSON Schema nhúng trong binary: `default`, `acceptEdits`, `plan`, `dontAsk`, `bypassPermissions`. Xem §3.9.
 
