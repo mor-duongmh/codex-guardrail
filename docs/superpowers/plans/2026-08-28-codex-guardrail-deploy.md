@@ -1291,7 +1291,7 @@ git add lib/rules/deploy.mjs lib/rules/infra.mjs policy/default.json tests/rules
 - Consumes: `inferPolicy(cwd, {runGit})`, `POLICY_FILE` từ `lib/init.mjs`
 - Produces: `inferPolicy` trả thêm khoá `deploy` và `selfProtect` trong object policy
 
-- [ ] **Step 1: Viết test đỏ**
+- [x] **Step 1: Viết test đỏ**
 
 `tests/init.test.mjs` — dùng đúng helper dựng repo tạm đã có trong file:
 
@@ -1332,12 +1332,12 @@ test('doctor phân biệt chưa khai với khai nửa vời', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy để thấy đỏ**
+- [x] **Step 2: Chạy để thấy đỏ**
 
 Run: `node --test tests/init.test.mjs tests/doctor.test.mjs`
 Expected: FAIL
 
-- [ ] **Step 3: `init` dò entrypoint**
+- [x] **Step 3: `init` dò entrypoint**
 
 Trong `lib/init.mjs`, cùng khuôn đã có với `lintCommand`: dò `scripts/deploy*`, script `deploy` trong `package.json`, target `deploy:` trong `Makefile`.
 
@@ -1345,7 +1345,7 @@ Trong `lib/init.mjs`, cùng khuôn đã có với `lintCommand`: dò `scripts/de
 - Không tìm được → **để trống và nói ra**, không đoán
 - `deploy.targets` **luôn để trống**: `init` không suy ra được tên môi trường, và đoán ở đây là đoán chính thứ cần review
 
-- [ ] **Step 4: `doctor` báo ba trạng thái khác nhau**
+- [x] **Step 4: `doctor` báo ba trạng thái khác nhau**
 
 ```
 ⚠ deploy — dự án chưa khai entrypoint hay target nào, nhóm deploy KHÔNG cưỡng chế gì
@@ -1355,21 +1355,21 @@ Trong `lib/init.mjs`, cùng khuôn đã có với `lintCommand`: dò `scripts/de
 
 Ba trạng thái này khác nhau về hành động nên phải hiện khác nhau. Trạng thái giữa là trạng thái guardrail chặn 100%, không phải trạng thái bảo vệ đúng.
 
-- [ ] **Step 5: `doctor` resolve alias ssh (phát hiện, không cưỡng chế)**
+- [x] **Step 5: `doctor` resolve alias ssh (phát hiện, không cưỡng chế)**
 
 Resolve từng `declaredHosts` trong `~/.ssh/config`. Gặp `Include`/`Match` thì phải nói **"không resolve được"**, không được đoán — cùng khuôn với bản ghi trust (doctor nói thẳng nó không kiểm được hash).
 
-- [ ] **Step 6: Chạy toàn bộ**
+- [x] **Step 6: Chạy toàn bộ**
 
 Run: `node --test tests/`
 Expected: tất cả xanh.
 
-- [ ] **Step 7: Chạy doctor thật**
+- [x] **Step 7: Chạy doctor thật**
 
 Run: `node bin/guardrail.mjs doctor`
 Expected: có dòng `deploy`, và dòng `✗ ... KHÔNG tìm được project root` nếu vẫn mở Codex từ home.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add lib/init.mjs lib/doctor.mjs tests/init.test.mjs tests/doctor.test.mjs && git commit -m "feat(init,doctor): dò script deploy, và nói ra trạng thái khai nửa vời"

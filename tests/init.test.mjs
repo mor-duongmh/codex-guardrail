@@ -165,3 +165,45 @@ test('in ra dòng CODEOWNERS cần thêm', () => {
   assert.ok(/codex-guardrail\.json\s+@/.test(out),
     `phải in mẫu dòng CODEOWNERS thật: ${out}`);
 });
+
+// --- dò phần deploy (Task 8 của plan deploy) --------------------------------
+// `targets` LUÔN để trống: init không suy ra được tên môi trường, và đoán ở đây
+// là đoán chính thứ cần review.
+
+test('init dò script deploy và sinh sẵn bảo vệ nó', () => {
+  const dir = repo({ 'scripts/deploy.sh': '#!/bin/sh\n' });
+  const { policy } = inferPolicy(dir, { runGit: git({}) });
+  assert.deepEqual(policy.deploy.entrypoints, ['./scripts/deploy.sh']);
+  assert.deepEqual(policy.selfProtect.protectedPaths['deploy.script'], ['scripts/deploy.sh']);
+});
+
+test('init dò được script deploy trong package.json và Makefile', () => {
+  const npm = repo({ 'package.json': JSON.stringify({ scripts: { deploy: 'node ship.js' } }) });
+  assert.deepEqual(inferPolicy(npm, { runGit: git({}) }).policy.deploy.entrypoints,
+    ['npm run deploy']);
+
+  const mk = repo({ Makefile: '.PHONY: deploy\ndeploy:\n\techo ship\n' });
+  assert.deepEqual(inferPolicy(mk, { runGit: git({}) }).policy.deploy.entrypoints,
+    ['make deploy']);
+});
+
+test('init KHÔNG đoán tên môi trường', () => {
+  const dir = repo({ 'scripts/deploy.sh': '#!/bin/sh\ncase "$1" in prod|staging) ;; esac\n' });
+  const { policy } = inferPolicy(dir, { runGit: git({}) });
+  assert.deepEqual(policy.deploy.targets, []);
+});
+
+test('không có script deploy thì để trống VÀ nói ra', () => {
+  const dir = repo({ 'src/index.js': '' });
+  const { policy, notes } = inferPolicy(dir, { runGit: git({}) });
+  assert.deepEqual(policy.deploy?.entrypoints ?? [], []);
+  assert.ok(notes.some(n => /deploy/i.test(n)),
+    'phải nói ra rằng nhóm deploy không cưỡng chế gì, không im lặng');
+});
+
+test('khai entrypoint mà thiếu targets thì notes phải cảnh báo chặn 100%', () => {
+  const dir = repo({ 'scripts/deploy.sh': '#!/bin/sh\n' });
+  const { notes } = inferPolicy(dir, { runGit: git({}) });
+  assert.ok(notes.some(n => /MỌI lệnh deploy/.test(n)),
+    'trạng thái khai-nửa-vời phải hiện khác trạng thái chưa-khai');
+});

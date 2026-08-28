@@ -563,3 +563,48 @@ test('doctor bỏ qua entry cũ hơn lần cài hiện tại', () => {
   const res = diagnose(repo());
   assert.equal(res.ok, true, `entry cũ không được hạ ok:\n${res.lines.join('\n')}`);
 });
+
+// --- deploy (Task 8 của plan deploy) ----------------------------------------
+// Ba trạng thái khác nhau về HÀNH ĐỘNG nên phải hiện khác nhau. Trạng thái giữa
+// là trạng thái guardrail chặn 100% lệnh deploy — đó không phải "bảo vệ đúng".
+
+
+// Helper cho nhóm deploy: dựng repo có codex-guardrail.json khai `deploy` rồi
+// lấy các dòng doctor in ra. Đi qua diagnose() thật, không gọi describeRules
+// trực tiếp — describeRules không export, và test nên đi đúng đường người dùng đi.
+function deployLines(deploy) {
+  sandbox();
+  const dir = repo({ 'codex-guardrail.json': JSON.stringify({ deploy }) });
+  return diagnose(dir).lines;
+}
+
+test('doctor phân biệt ba trạng thái của nhóm deploy', () => {
+  const none = deployLines({ entrypoints: [], targets: [] });
+  assert.ok(none.some(l => /deploy.*KHÔNG cưỡng chế/.test(l)), none.join('\n'));
+
+  const half = deployLines({ entrypoints: ['./d.sh'], targets: [] });
+  assert.ok(half.some(l => /MỌI lệnh deploy sẽ bị chặn/.test(l)), half.join('\n'));
+
+  const full = deployLines({
+    entrypoints: ['./d.sh'],
+    targets: [{ name: 'staging', branches: ['develop'] }, { name: 'prod', branches: ['main'] }],
+  });
+  assert.ok(full.some(l => /✓ deploy/.test(l)), full.join('\n'));
+  assert.ok(full.some(l => /2 đích/.test(l)), full.join('\n'));
+});
+
+test('doctor nói ra đích nào đòi người xác nhận', () => {
+  const lines = deployLines({
+    entrypoints: ['./d.sh'],
+    targets: [{ name: 'prod', branches: ['main'], requireHumanEscape: true }],
+  });
+  assert.ok(lines.some(l => /người xác nhận: prod/.test(l)), lines.join('\n'));
+  assert.ok(lines.some(l => /CODEX_GUARDRAIL_ALLOW=deploy\.target\./.test(l)),
+    'phải nói ra CÁCH mở, không chỉ nói là bị chặn');
+});
+
+test('doctor nói ra khi declaredHosts trống: nhóm B không được hỏi gì', () => {
+  const lines = deployLines({ entrypoints: ['./d.sh'], targets: [{ name: 'x' }] });
+  assert.ok(lines.some(l => /declaredHosts|scp.*rsync|đích chưa khai/.test(l)),
+    lines.join('\n'));
+});
