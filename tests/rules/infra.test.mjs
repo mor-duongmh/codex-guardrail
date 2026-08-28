@@ -402,3 +402,37 @@ test('cờ không mang giá trị không ăn mất lệnh thật', () => {
     assert.equal(evaluate(shell(cmd), P).decision, 'deny', `ca: ${cmd}`);
   }
 });
+
+// --- công cụ publish hosting công khai (Task 6 của plan deploy) --------------
+
+test('chặn công cụ chỉ dùng để publish, ở mức binary', () => {
+  // `surge` gọi trần là deploy luôn, `gh-pages` chỉ có một việc — không có chế
+  // độ local nào để giữ, nên mức binary là đúng.
+  for (const cmd of ['surge ./dist my-app.surge.sh', 'npx gh-pages -d dist', 'surge']) {
+    assert.equal(evaluate(shell(cmd), P).ruleId, 'infra.deny-binary', cmd);
+  }
+});
+
+test('chặn subcommand publish, GIỮ chế độ local', () => {
+  for (const cmd of ['netlify deploy', 'netlify deploy --prod', 'firebase deploy',
+                     'firebase deploy --only hosting', 'railway up', 'sudo railway up',
+                     'npx netlify deploy --prod --dir=dist', 'docker push me/app',
+                     'cd web && netlify deploy']) {
+    assert.equal(evaluate(shell(cmd), P).ruleId, 'infra.deny-pattern', cmd);
+  }
+  // Đây là nửa quan trọng hơn: chặn cả binary sẽ biến những lệnh này thành
+  // escape từng phiên đến hết đời dự án, vì mergePolicy HỢP mảng nên mục trong
+  // bản mặc định không xoá được.
+  for (const cmd of ['netlify dev', 'netlify link', 'netlify env:list', 'netlify status',
+                     'firebase emulators:start', 'firebase login', 'firebase projects:list',
+                     'firebase init', 'railway logs', 'railway run npm test',
+                     'railway status', 'docker ps']) {
+    assert.equal(evaluate(shell(cmd), P).decision, 'allow', cmd);
+  }
+});
+
+test('ranh giới subcommand: deploying không phải deploy', () => {
+  assert.equal(evaluate(shell('netlify deploying-notes.md'), P).decision, 'allow');
+  assert.equal(evaluate(shell('grep -rn "netlify deploy" docs/'), P).decision, 'allow');
+  assert.equal(evaluate(shell('echo firebase deploy'), P).decision, 'allow');
+});

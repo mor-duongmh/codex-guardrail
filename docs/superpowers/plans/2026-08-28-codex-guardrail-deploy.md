@@ -71,7 +71,7 @@ Vá một lỗ **có sẵn** phát hiện khi lập plan, không phải việc r
 - Consumes: `basename` từ `lib/tokenize.mjs` (đã có)
 - Produces: `SHELL_WRAPPERS: Set<string>` export từ `lib/tokenize.mjs`; `effectiveArgv(rawArgv: string[]) => string[]` giữ nguyên chữ ký
 
-- [ ] **Step 1: Viết test đỏ**
+- [x] **Step 1: Viết test đỏ**
 
 Tạo `tests/argv.test.mjs`:
 
@@ -109,12 +109,12 @@ test('không bóc khi shell không chạy script', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy để thấy đỏ**
+- [x] **Step 2: Chạy để thấy đỏ**
 
 Run: `node --test tests/argv.test.mjs`
 Expected: FAIL — `bash scripts/deploy.sh prod` trả `['bash','scripts/deploy.sh','prod']`
 
-- [ ] **Step 3: Export `SHELL_WRAPPERS` và mở rộng nó**
+- [x] **Step 3: Export `SHELL_WRAPPERS` và mở rộng nó**
 
 Trong `lib/tokenize.mjs`, dòng 6:
 
@@ -128,7 +128,7 @@ export const SHELL_WRAPPERS = new Set([
 ]);
 ```
 
-- [ ] **Step 4: Dùng nó trong `argv.mjs`**
+- [x] **Step 4: Dùng nó trong `argv.mjs`**
 
 Dòng 7:
 
@@ -157,17 +157,17 @@ const WRAPPERS = new Set([
 ]);
 ```
 
-- [ ] **Step 5: Chạy test của task**
+- [x] **Step 5: Chạy test của task**
 
 Run: `node --test tests/argv.test.mjs`
 Expected: PASS
 
-- [ ] **Step 6: Chạy TOÀN BỘ suite — bắt buộc, task này chạm 4 nhóm rule**
+- [x] **Step 6: Chạy TOÀN BỘ suite — bắt buộc, task này chạm 4 nhóm rule**
 
 Run: `node --test tests/`
 Expected: `# pass 411 # fail 0` (409 cũ + 2 test mới). Đã đo trước khi viết plan: bản vá này giữ 409/409 xanh.
 
-- [ ] **Step 7: Kiểm không chặn oan**
+- [x] **Step 7: Kiểm không chặn oan**
 
 Run:
 
@@ -177,11 +177,11 @@ node --input-type=module -e "import {evaluate} from './lib/rules/infra.mjs'; imp
 
 Expected: `allow` cho cả 7. Và `bash -c "psql -l"` vẫn `deny`.
 
-- [ ] **Step 8: Mutation test**
+- [x] **Step 8: Mutation test**
 
 Bỏ `'source', '.'` khỏi `WRAPPERS`. Expected: test `bóc trình thông dịch shell` đỏ ở 2 ca. Hoàn nguyên.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add lib/tokenize.mjs lib/argv.mjs tests/argv.test.mjs && git commit -m "fix(argv): bóc trình thông dịch shell, vá lỗ bash ./script.sh đi vòng mọi rule"
@@ -202,7 +202,7 @@ git add lib/tokenize.mjs lib/argv.mjs tests/argv.test.mjs && git commit -m "fix(
 - Consumes: `ctx.permissionMode` từ `lib/context.mjs:138` (`string | null`)
 - Produces: `ask(ruleId, reason, hint) => {decision:'ask', ruleId, reason, hint}`; `runHook` trả `{decision:'ask', stdout, stderr}` với `permissionDecision: 'ask'` trong JSON
 
-- [ ] **Step 1: Viết test đỏ**
+- [x] **Step 1: Viết test đỏ**
 
 Thêm vào `tests/dispatch.test.mjs`:
 
@@ -238,12 +238,12 @@ test('deny THẮNG ask kể cả khi ask đến trước', () => {
 
 Helper `runHookWith` / `runHookTwoRules`: dùng đúng nếp `freshAudit()` đã có trong file, và tiêm rule giả qua `REGISTRY`. Nếu `REGISTRY` chưa export được thì test qua `deploy.undeclared-destination` thật ở Task 7 và **giữ nguyên 4 assert trên**, chỉ đổi cách dựng ctx.
 
-- [ ] **Step 2: Chạy để thấy đỏ**
+- [x] **Step 2: Chạy để thấy đỏ**
 
 Run: `node --test tests/dispatch.test.mjs`
 Expected: FAIL — `ask` bị coi là allow, `out.decision === 'allow'`
 
-- [ ] **Step 3: Thêm `ask` vào `lib/result.mjs`**
+- [x] **Step 3: Thêm `ask` vào `lib/result.mjs`**
 
 ```js
 export const ALLOW = Object.freeze({ decision: 'allow' });
@@ -261,7 +261,7 @@ export function ask(ruleId, reason, hint) {
 }
 ```
 
-- [ ] **Step 4: Chế độ nào thì `ask` có nghĩa**
+- [x] **Step 4: Chế độ nào thì `ask` có nghĩa**
 
 Thêm vào `lib/dispatch.mjs`, cạnh `SAFETY_GROUPS`:
 
@@ -280,7 +280,7 @@ function askIsAnswerable(ctx) {
 }
 ```
 
-- [ ] **Step 5: Đường phát `ask`**
+- [x] **Step 5: Đường phát `ask`**
 
 Thêm cạnh `deny()`:
 
@@ -311,7 +311,7 @@ export function askMessage(result, ctx) {
 }
 ```
 
-- [ ] **Step 6: Sửa vòng lặp — deny phải thắng ask**
+- [x] **Step 6: Sửa vòng lặp — deny phải thắng ask**
 
 Trong `runHook`, đổi `if (res.decision !== 'deny') continue;` thành:
 
@@ -351,12 +351,12 @@ Sau vòng lặp, thay `return allow(stderr)`:
 
 Bóc khối `common` hiện tại (dispatch.mjs:144-163) thành `commonFor(res)` để dùng được ở cả ba chỗ. Giữ nguyên từng trường và từng comment — chúng ghi lý do `?? undefined` thay vì `?? null`, và lý do `currentBranch` chỉ gọi ngoài đường allow.
 
-- [ ] **Step 7: Chạy test**
+- [x] **Step 7: Chạy test**
 
 Run: `node --test tests/dispatch.test.mjs`
 Expected: PASS
 
-- [ ] **Step 8: Chạy toàn bộ + mutation**
+- [x] **Step 8: Chạy toàn bộ + mutation**
 
 Run: `node --test tests/`
 Expected: 411 + 4 = 415 pass, 0 fail.
@@ -365,7 +365,7 @@ Mutation 1: đổi `MODES_WITH_HUMAN` thành `new Set(['default','acceptEdits','
 
 Mutation 2: đổi `pendingDeny ??= res` thành `pendingAsk ??= res`. Expected: test `permissionMode thiếu thì ask hạ về deny` đỏ. Hoàn nguyên.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add lib/result.mjs lib/dispatch.mjs tests/dispatch.test.mjs && git commit -m "feat(dispatch): ask là quyết định hạng nhất, deny thắng ask, hạ ask khi không có ai bấm"
@@ -387,7 +387,7 @@ Ba rule cốt lõi trả lời trực tiếp §1. Task này cũng nối module v
 - Consumes: `parseCommand`, `tokenize` từ `lib/tokenize.mjs`; `effectiveArgv` từ `lib/argv.mjs`; `normalizePath` từ `lib/glob.mjs`; `ALLOW`, `deny` từ `lib/result.mjs`
 - Produces: `evaluate(ctx, policy)`; nội bộ `matchEntry(argv, entries)`, `targetsIn(rest, names)`, `normToken(t)`
 
-- [ ] **Step 1: Viết test đỏ**
+- [x] **Step 1: Viết test đỏ**
 
 Tạo `tests/rules/deploy.test.mjs`:
 
@@ -483,12 +483,12 @@ test('biến môi trường không nở ra: lệch về phía chặn', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy để thấy đỏ**
+- [x] **Step 2: Chạy để thấy đỏ**
 
 Run: `node --test tests/rules/deploy.test.mjs`
 Expected: FAIL — `Cannot find module '../../lib/rules/deploy.mjs'`
 
-- [ ] **Step 3: Thêm khung `deploy` rỗng vào `policy/default.json`**
+- [x] **Step 3: Thêm khung `deploy` rỗng vào `policy/default.json`**
 
 ```json
   "deploy": {
@@ -501,7 +501,7 @@ Expected: FAIL — `Cannot find module '../../lib/rules/deploy.mjs'`
 
 Ba mảng này phải **mãi mãi rỗng**: `mergePolicy` HỢP mảng chứ không thay, nên một mục ở đây là một mục không dự án nào xoá được. `requireExplicitTarget` là boolean nên thay được — đó là lý do nó là boolean.
 
-- [ ] **Step 4: Viết `lib/rules/deploy.mjs`**
+- [x] **Step 4: Viết `lib/rules/deploy.mjs`**
 
 ```js
 // lib/rules/deploy.mjs
@@ -613,7 +613,7 @@ export function evaluate(ctx, policy) {
 }
 ```
 
-- [ ] **Step 5: Đăng ký vào dispatch**
+- [x] **Step 5: Đăng ký vào dispatch**
 
 `lib/dispatch.mjs` — import, `SAFETY_GROUPS`, và REGISTRY:
 
@@ -627,17 +627,17 @@ Trong `REGISTRY.PreToolUse.Bash`, chèn `['deploy', deploy]` **giữa** `secrets
 
 `apply_patch` **không** thêm `deploy`: nhóm này soi lệnh sẽ chạy, còn `ctx.command` là null với `apply_patch` (context.mjs:116) nên nó sẽ trả ALLOW ngay. Thêm vào chỉ tốn một lần gọi hàm trên đường nóng.
 
-- [ ] **Step 6: Chạy test**
+- [x] **Step 6: Chạy test**
 
 Run: `node --test tests/rules/deploy.test.mjs`
 Expected: PASS (9 test)
 
-- [ ] **Step 7: Chạy toàn bộ**
+- [x] **Step 7: Chạy toàn bộ**
 
 Run: `node --test tests/`
 Expected: 415 + 9 = 424 pass, 0 fail. Đặc biệt xác nhận `tests/latency.test.mjs` không đỏ.
 
-- [ ] **Step 8: Mutation test**
+- [x] **Step 8: Mutation test**
 
 1. Đổi `if (found.length > 1)` thành `>= 1`. Expected: test `bóc đích không phụ thuộc vị trí hay cờ` đỏ.
 2. Trong `targetsIn`, đổi `names.has(tok)` thành `[...names].some(n => tok.includes(n))`. Expected: test `token chỉ CHỨA tên đích` đỏ.
@@ -645,7 +645,7 @@ Expected: 415 + 9 = 424 pass, 0 fail. Đặc biệt xác nhận `tests/latency.t
 
 Hoàn nguyên cả ba.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add lib/rules/deploy.mjs policy/default.json lib/dispatch.mjs tests/rules/deploy.test.mjs && git commit -m "feat(deploy): chặn deploy không nêu đích, đích lạ, và đích mơ hồ"
@@ -666,7 +666,7 @@ Task này sửa một lỗ trong chính spec, phát hiện khi lập plan: `depl
 - Consumes: `globToRegExp`, `matchesAny` từ `lib/glob.mjs`; `ctx.projectRoot`
 - Produces: không thêm export mới
 
-- [ ] **Step 1: Viết test đỏ**
+- [x] **Step 1: Viết test đỏ**
 
 ```js
 const rootless = (command) => ({ ...shell(command), cwd: '/Users/me', projectRoot: null });
@@ -705,12 +705,12 @@ test('no-project-root chạy TRƯỚC no-target', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy để thấy đỏ**
+- [x] **Step 2: Chạy để thấy đỏ**
 
 Run: `node --test tests/rules/deploy.test.mjs`
 Expected: FAIL — `decision` là `allow`, không phải `deny`
 
-- [ ] **Step 3: Thêm `detectScripts` vào `policy/default.json`**
+- [x] **Step 3: Thêm `detectScripts` vào `policy/default.json`**
 
 Vào khối `deploy`:
 
@@ -723,7 +723,7 @@ Mảng này **có dữ liệu ở bản mặc định**, khác ba mảng kia, v�
 
 Hai dạng glob (`**/deploy*.sh` và `deploy*.sh`) vì `**/` của `globToRegExp` sinh `(?:.*/)?` — kiểm bằng test, không suy đoán: nếu một dạng đã phủ cả hai thì bỏ dạng kia.
 
-- [ ] **Step 4: Cài rule**
+- [x] **Step 4: Cài rule**
 
 Trong `lib/rules/deploy.mjs`, sửa import:
 
@@ -764,12 +764,12 @@ Trong `evaluate`, **trước** khối `if (entries.length === 0) return ALLOW;`:
   }
 ```
 
-- [ ] **Step 5: Chạy test**
+- [x] **Step 5: Chạy test**
 
 Run: `node --test tests/rules/deploy.test.mjs`
 Expected: PASS (13 test)
 
-- [ ] **Step 6: Đo lại chặn oan trên tập rộng hơn**
+- [x] **Step 6: Đo lại chặn oan trên tập rộng hơn**
 
 Run:
 
@@ -779,11 +779,11 @@ node --input-type=module -e "import {runHook} from './lib/dispatch.mjs'; const p
 
 Expected: `allow` cho cả 8.
 
-- [ ] **Step 7: Mutation test**
+- [x] **Step 7: Mutation test**
 
 Đổi `looksLikeDeployScript` để soi mọi token (`argv.some(...)` thay vì `argv[0]`). Expected: test `detectScripts chỉ khớp khi script ĐANG được thi hành` đỏ ở nhiều ca. Hoàn nguyên.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add lib/rules/deploy.mjs policy/default.json tests/rules/deploy.test.mjs && git commit -m "feat(deploy): chặn deploy khi không đọc được policy dự án, cò súng ở bản mặc định"
@@ -801,7 +801,7 @@ git add lib/rules/deploy.mjs policy/default.json tests/rules/deploy.test.mjs && 
 - Consumes: `currentBranch(cwd)` từ `lib/rules/git-workflow.mjs`; `globToRegExp`, `matchesAny` (đã import ở Task 4)
 - Produces: `evaluate(ctx, policy, currentBranch = defaultCurrentBranch)` — tham số thứ ba có mặc định, nên mọi lời gọi hai tham số ở Task 3/4 và ở `dispatch.mjs` vẫn đúng
 
-- [ ] **Step 1: Viết test đỏ**
+- [x] **Step 1: Viết test đỏ**
 
 ```js
 test('branch đúng thì cho qua, branch sai thì chặn — cả hai chiều', () => {
@@ -878,12 +878,12 @@ test('ruleId chứa tên target, không dùng chung một khoá', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy để thấy đỏ**
+- [x] **Step 2: Chạy để thấy đỏ**
 
 Run: `node --test tests/rules/deploy.test.mjs`
 Expected: FAIL — `deploy.sh prod` với branch `develop` đang trả `allow`
 
-- [ ] **Step 3: Cài rule**
+- [x] **Step 3: Cài rule**
 
 Sửa chữ ký để `currentBranch` tiêm được:
 
@@ -925,12 +925,12 @@ Trong nhánh `found.length === 1` (tức sau cả hai khối `found.length > 1` 
 
 `ruleId` phải chứa tên target: dùng chung một `deploy.high-consequence` thì một lần escape mở cho **mọi** đích hệ quả cao, mà cả điểm của nó là mở đúng một đích.
 
-- [ ] **Step 4: Chạy test**
+- [x] **Step 4: Chạy test**
 
 Run: `node --test tests/rules/deploy.test.mjs`
 Expected: PASS (21 test)
 
-- [ ] **Step 5: Kiểm đường allow không spawn git**
+- [x] **Step 5: Kiểm đường allow không spawn git**
 
 Run: `node --test tests/latency.test.mjs`
 Expected: PASS, phần dôi của đường allow không tăng.
@@ -943,14 +943,14 @@ node --input-type=module -e "import {evaluate} from './lib/rules/deploy.mjs'; im
 
 Expected: `1`.
 
-- [ ] **Step 6: Mutation test**
+- [x] **Step 6: Mutation test**
 
 1. Đổi `if (!branch || !matchesAny(...))` thành `if (branch && !matchesAny(...))`. Expected: test `không biết branch thì chặn, không đoán` đỏ.
 2. Chuyển khối `requireHumanEscape` xuống **sau** phép kiểm branch. Expected: test `requireHumanEscape thắng branch-mismatch` đỏ.
 
 Hoàn nguyên cả hai.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add lib/rules/deploy.mjs tests/rules/deploy.test.mjs && git commit -m "feat(deploy): branch phải khớp đích, và đích hệ quả cao đòi người xác nhận"
@@ -969,7 +969,7 @@ git add lib/rules/deploy.mjs tests/rules/deploy.test.mjs && git commit -m "feat(
 - Consumes: `cfg.denyDirect` (mảng chuỗi regex, mặc định `[]`)
 - Produces: không thêm export mới
 
-- [ ] **Step 1: Viết test đỏ**
+- [x] **Step 1: Viết test đỏ**
 
 Vào `tests/rules/infra.test.mjs`:
 
@@ -1024,12 +1024,12 @@ test('denyDirect không khớp văn bản trong tham số', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy để thấy đỏ**
+- [x] **Step 2: Chạy để thấy đỏ**
 
 Run: `node --test tests/rules/`
 Expected: FAIL cả hai file
 
-- [ ] **Step 3: Thêm dữ liệu vào `policy/default.json`**
+- [x] **Step 3: Thêm dữ liệu vào `policy/default.json`**
 
 `infra.denyBinaries` — thêm `"surge"`, `"gh-pages"`. Chỉ hai công cụ này ở mức binary, vì cả hai **không có chế độ local nào**: gọi trần `surge` là deploy luôn.
 
@@ -1046,7 +1046,7 @@ Expected: FAIL cả hai file
 
 `(?![\w-])` không phải trang trí: nó là thứ giữ `netlify deploying-notes.md` không bị coi là `netlify deploy`.
 
-- [ ] **Step 4: Cài `deploy.direct-tool`**
+- [x] **Step 4: Cài `deploy.direct-tool`**
 
 Trong `evaluate`, trong vòng lặp segment, **trước** `matchEntry`:
 
@@ -1075,12 +1075,12 @@ Biên dịch regex **ngoài** vòng lặp segment, cạnh `const names = ...`:
 
 `denyDirect` mặc định rỗng nên đường nóng không trả phí gì.
 
-- [ ] **Step 5: Chạy test**
+- [x] **Step 5: Chạy test**
 
 Run: `node --test tests/`
 Expected: tất cả xanh, 0 fail.
 
-- [ ] **Step 6: Đo lại 6 công cụ ở §2.1 mà task này nhận**
+- [x] **Step 6: Đo lại 6 công cụ ở §2.1 mà task này nhận**
 
 ```bash
 node --input-type=module -e "import {runHook} from './lib/dispatch.mjs'; const p=c=>JSON.stringify({hook_event_name:'PreToolUse',tool_name:'Bash',cwd:process.cwd(),permission_mode:'default',tool_input:{command:c}}); for (const c of ['netlify deploy --prod','firebase deploy','surge ./dist my-app.surge.sh','railway up','docker push docker.io/me/app','npx gh-pages -d dist']) console.log(runHook(p(c),{GUARDRAIL_AUDIT_PATH:'/dev/null'}).decision, c)"
@@ -1088,11 +1088,11 @@ node --input-type=module -e "import {runHook} from './lib/dispatch.mjs'; const p
 
 Expected: `deny` cho cả 6. Bốn mục còn lại (`scp`/`rsync`/`ssh`/`curl`) là Task 7.
 
-- [ ] **Step 7: Mutation test**
+- [x] **Step 7: Mutation test**
 
 Bỏ `(?![\w-])` khỏi `netlify\s+deploy`. Expected: test `ranh giới subcommand` đỏ. Hoàn nguyên.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add lib/rules/deploy.mjs policy/default.json tests/rules/ && git commit -m "feat(deploy): chặn công cụ publish trực tiếp, mức subcommand cho công cụ có chế độ local"
@@ -1112,7 +1112,7 @@ git add lib/rules/deploy.mjs policy/default.json tests/rules/ && git commit -m "
 - Consumes: `ask` từ `lib/result.mjs` (Task 2); `basename` từ `lib/tokenize.mjs`
 - Produces: `sshParts(argv) => {target, remote}` và `scpHosts(argv) => string[]` export từ `lib/rules/infra.mjs` (chữ ký giữ nguyên, chỉ thêm `export`)
 
-- [ ] **Step 1: Viết test đỏ**
+- [x] **Step 1: Viết test đỏ**
 
 ```js
 const withHosts = () => mergePolicy(P0, {
@@ -1168,12 +1168,12 @@ test('URL không parse được thì không hỏi', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy để thấy đỏ**
+- [x] **Step 2: Chạy để thấy đỏ**
 
 Run: `node --test tests/rules/deploy.test.mjs`
 Expected: FAIL — trả `allow` thay vì `ask`
 
-- [ ] **Step 3: Export lại bộ bóc host từ `infra.mjs`**
+- [x] **Step 3: Export lại bộ bóc host từ `infra.mjs`**
 
 `lib/rules/infra.mjs` — đổi `function sshParts` thành `export function sshParts`, `function scpHosts` thành `export function scpHosts`. Kèm comment:
 
@@ -1182,7 +1182,7 @@ Expected: FAIL — trả `allow` thay vì `ask`
 // là đúng lớp bug mà `lib/argv.mjs` sinh ra để chặn: sửa một chỗ quên chỗ kia.
 ```
 
-- [ ] **Step 4: Cài rule**
+- [x] **Step 4: Cài rule**
 
 Thêm import và hằng số:
 
@@ -1252,12 +1252,12 @@ Khai ngoài vòng lặp, cạnh `denyDirectRes`:
 
 Và thêm `"declaredHosts": []` vào khối `deploy` của `policy/default.json` — mảng rỗng vĩnh viễn, cùng lý do §6.1.
 
-- [ ] **Step 5: Chạy test**
+- [x] **Step 5: Chạy test**
 
 Run: `node --test tests/`
 Expected: tất cả xanh.
 
-- [ ] **Step 6: Đo số prompt trên tập lệnh hằng ngày**
+- [x] **Step 6: Đo số prompt trên tập lệnh hằng ngày**
 
 ```bash
 node --input-type=module -e "import {evaluate} from './lib/rules/deploy.mjs'; import {loadDefaultPolicy,mergePolicy} from './lib/policy.mjs'; const p=mergePolicy(loadDefaultPolicy(),{deploy:{entrypoints:['./d.sh'],targets:[{name:'x'}],declaredHosts:['staging.acme.internal']}}); const cmds=['curl -fsSL https://deb.nodesource.com/setup_20.x','curl -s https://api.github.com/repos/x/y','curl -o out.tar.gz https://x/y.tar.gz','curl -I https://example.com','curl https://localhost:3000/health','ssh staging.acme.internal uptime','scp staging.acme.internal:/var/log/app.log .','rsync -avz staging.acme.internal:/var/log ./logs','curl -s http://localhost:8080/metrics','curl --version','curl -L https://install.example/script','npm install','git fetch origin','ssh-add -l','curl -sS https://raw.githubusercontent.com/a/b/main/f.sh','scp ./notes.md staging.acme.internal:/tmp/','curl -X GET https://api.example/items','curl -H \"Accept: json\" https://api.example/x','rsync -av ./src ./backup','curl -w \"%{http_code}\" -o /dev/null https://example.com']; let asks=0; for (const c of cmds) { const r=evaluate({tool:'Bash',command:c,patchFiles:[],cwd:'/r',projectRoot:'/r',escapes:new Set(),permissionMode:'default'},p); if (r.decision==='ask') { asks++; console.log('HỎI:', c); } } console.log('số prompt:', asks, '/', cmds.length, '(phải là 0)')"
@@ -1265,14 +1265,14 @@ node --input-type=module -e "import {evaluate} from './lib/rules/deploy.mjs'; im
 
 Expected: `0`. Nếu có prompt nào, điều kiện hỏi còn quá rộng — thu hẹp, đừng chấp nhận.
 
-- [ ] **Step 7: Mutation test**
+- [x] **Step 7: Mutation test**
 
 1. Bỏ điều kiện `curlPushes(argv)` (hỏi với mọi `curl`). Expected: test `lệnh LẤY VỀ thì không hỏi` đỏ.
 2. Trong `remoteDestHost`, đổi `positional[positional.length - 1]` thành `positional[0]`. Expected: test `lệnh ĐẨY...` và `lệnh LẤY VỀ...` đỏ (hai chiều đảo nhau).
 
 Hoàn nguyên cả hai.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add lib/rules/deploy.mjs lib/rules/infra.mjs policy/default.json tests/rules/deploy.test.mjs && git commit -m "feat(deploy): hỏi khi đẩy dữ liệu tới host chưa khai, không hỏi khi lấy về"
@@ -1291,7 +1291,7 @@ git add lib/rules/deploy.mjs lib/rules/infra.mjs policy/default.json tests/rules
 - Consumes: `inferPolicy(cwd, {runGit})`, `POLICY_FILE` từ `lib/init.mjs`
 - Produces: `inferPolicy` trả thêm khoá `deploy` và `selfProtect` trong object policy
 
-- [ ] **Step 1: Viết test đỏ**
+- [x] **Step 1: Viết test đỏ**
 
 `tests/init.test.mjs` — dùng đúng helper dựng repo tạm đã có trong file:
 
@@ -1332,12 +1332,12 @@ test('doctor phân biệt chưa khai với khai nửa vời', () => {
 });
 ```
 
-- [ ] **Step 2: Chạy để thấy đỏ**
+- [x] **Step 2: Chạy để thấy đỏ**
 
 Run: `node --test tests/init.test.mjs tests/doctor.test.mjs`
 Expected: FAIL
 
-- [ ] **Step 3: `init` dò entrypoint**
+- [x] **Step 3: `init` dò entrypoint**
 
 Trong `lib/init.mjs`, cùng khuôn đã có với `lintCommand`: dò `scripts/deploy*`, script `deploy` trong `package.json`, target `deploy:` trong `Makefile`.
 
@@ -1345,7 +1345,7 @@ Trong `lib/init.mjs`, cùng khuôn đã có với `lintCommand`: dò `scripts/de
 - Không tìm được → **để trống và nói ra**, không đoán
 - `deploy.targets` **luôn để trống**: `init` không suy ra được tên môi trường, và đoán ở đây là đoán chính thứ cần review
 
-- [ ] **Step 4: `doctor` báo ba trạng thái khác nhau**
+- [x] **Step 4: `doctor` báo ba trạng thái khác nhau**
 
 ```
 ⚠ deploy — dự án chưa khai entrypoint hay target nào, nhóm deploy KHÔNG cưỡng chế gì
@@ -1355,21 +1355,21 @@ Trong `lib/init.mjs`, cùng khuôn đã có với `lintCommand`: dò `scripts/de
 
 Ba trạng thái này khác nhau về hành động nên phải hiện khác nhau. Trạng thái giữa là trạng thái guardrail chặn 100%, không phải trạng thái bảo vệ đúng.
 
-- [ ] **Step 5: `doctor` resolve alias ssh (phát hiện, không cưỡng chế)**
+- [x] **Step 5: `doctor` resolve alias ssh (phát hiện, không cưỡng chế)**
 
 Resolve từng `declaredHosts` trong `~/.ssh/config`. Gặp `Include`/`Match` thì phải nói **"không resolve được"**, không được đoán — cùng khuôn với bản ghi trust (doctor nói thẳng nó không kiểm được hash).
 
-- [ ] **Step 6: Chạy toàn bộ**
+- [x] **Step 6: Chạy toàn bộ**
 
 Run: `node --test tests/`
 Expected: tất cả xanh.
 
-- [ ] **Step 7: Chạy doctor thật**
+- [x] **Step 7: Chạy doctor thật**
 
 Run: `node bin/guardrail.mjs doctor`
 Expected: có dòng `deploy`, và dòng `✗ ... KHÔNG tìm được project root` nếu vẫn mở Codex từ home.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add lib/init.mjs lib/doctor.mjs tests/init.test.mjs tests/doctor.test.mjs && git commit -m "feat(init,doctor): dò script deploy, và nói ra trạng thái khai nửa vời"
@@ -1388,7 +1388,7 @@ Task cuối vì nó kiểm điều duy nhất unit test không kiểm được.
 
 **Interfaces:** không có API mới.
 
-- [ ] **Step 1: Ghi 12 giới hạn §9 vào README**
+- [x] **Step 1: Ghi 12 giới hạn §9 vào README**
 
 Không che một mục nào. Đặc biệt ba mục dễ bị bỏ:
 
@@ -1396,7 +1396,7 @@ Không che một mục nào. Đặc biệt ba mục dễ bị bỏ:
 - #10: `bash ./deploy.sh` được bịt ở Task 1, nhưng danh sách trình thông dịch **không thể đầy đủ** — `perl -e`, một wrapper tự viết trong repo vẫn gọi được script
 - #11: `netlify`/`firebase`/`railway` chặn theo subcommand nên **một subcommand publish mới sẽ lọt** cho tới khi có người thêm pattern, và `doctor` không phát hiện được thiếu sót kiểu này
 
-- [ ] **Step 2: Test README**
+- [x] **Step 2: Test README**
 
 ```js
 test('README ghi đủ giới hạn của nhóm deploy', () => {
@@ -1436,7 +1436,7 @@ Ba kết quả, ba hành động:
 
 Ghi **quan sát**, không ghi suy luận. Nếu chưa chạy được lượt thật thì §11.4 vẫn mở, và README **phải** viết "thiết kế để hỏi", không phải "sẽ hỏi".
 
-- [ ] **Step 6: Đo lại độ trễ**
+- [x] **Step 6: Đo lại độ trễ**
 
 Run: `node --test tests/latency.test.mjs`
 Expected: p95 < 150ms, và phần dôi của đường allow không tăng so với baseline 27.8ms.

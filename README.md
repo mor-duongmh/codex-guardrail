@@ -71,8 +71,9 @@ là file của họ). Tầng 2 và 3 tồn tại chính vì thế.
 | Nhóm | Chặn gì |
 |---|---|
 | `secrets` | 19 mẫu đường dẫn secret (`.env`, `~/.aws/**`, `~/.ssh/**`, ...), 6 mẫu miễn |
-| `infra` | 21 binary thao tác database/cloud (`psql`, `terraform`, `aws`, ...) và 5 mẫu lệnh phá huỷ |
+| `infra` | 23 binary thao tác database/cloud và publish (`psql`, `terraform`, `aws`, `surge`, `gh-pages`, ...) và 9 mẫu lệnh phá huỷ / publish (`docker push`, `netlify deploy`, `firebase deploy`, `railway up`, ...) |
 | `git` | branch được bảo vệ `main`, `master`, `develop`, `release/*`; cờ phá huỷ; commit message lệch convention |
+| `deploy` | deploy phải NÊU RÕ đích, đích phải đã khai, branch phải khớp đích; đích hệ quả cao đòi người xác nhận; đẩy dữ liệu tới host chưa khai thì **hỏi** |
 | `selfprotect` | sửa/xoá chính `hooks.json`, `codex-guardrail.json`, thư mục runtime của guardrail |
 
 `policy/default.json` còn khai bốn nhóm nữa — `convention`, `quality`, `net`,
@@ -91,6 +92,51 @@ thêm vào, không mất phần còn lại.
 có thật. Thiếu thông tin thì nó **để trống chứ không đoán** — đáng chú ý nhất:
 nếu repo chưa theo conventional commits thì nó KHÔNG áp quy ước đó, vì áp bừa sẽ
 chặn oan mọi commit tiếp theo. `init` **không ghi đè** file đang có.
+
+## Nhóm `deploy` — bài toán "AI tự đoán deploy đi đâu"
+
+Nhóm này khác bốn nhóm kia ở một điểm quyết định: nó là **allow-list**. Bốn nhóm
+kia liệt kê cái BỊ CẤM nên chúng bảo vệ được ngay từ bản mặc định; `deploy` liệt
+kê cái ĐƯỢC PHÉP nên nó **không cưỡng chế gì tới khi dự án khai**.
+
+Khai vào `codex-guardrail.json` ở gốc repo:
+
+```json
+{
+  "deploy": {
+    "entrypoints": ["./scripts/deploy.sh"],
+    "targets": [
+      { "name": "staging", "branches": ["develop"] },
+      { "name": "prod", "branches": ["release/*"], "requireHumanEscape": true }
+    ],
+    "declaredHosts": ["staging.acme.internal", "*.prod.acme.internal"]
+  }
+}
+```
+
+`guardrail init` dò sẵn `entrypoints` và sinh luôn bảo vệ cho chính script đó.
+Nó **không đoán** `targets` — tên môi trường là đúng thứ cần người review.
+
+Đích được bóc từ **toàn bộ tham số**, không theo vị trí, nên bốn dạng dưới đây
+tương đương: `./deploy.sh prod`, `./deploy.sh --env=prod`, `./deploy.sh --env prod`,
+`make deploy ENV=prod`.
+
+Ba trạng thái mà `guardrail doctor` phân biệt, vì chúng khác nhau về hành động:
+
+| Trạng thái | Nghĩa |
+|---|---|
+| chưa khai `entrypoints` | nhóm KHÔNG cưỡng chế gì với script của dự án |
+| có `entrypoints`, `targets` rỗng | **MỌI** lệnh deploy bị chặn — không phải "đang bảo vệ đúng" |
+| khai đủ | đang bảo vệ |
+
+**Nhóm B không bị chặn, mà được hỏi.** `scp`/`rsync`/`ssh`/`curl` là lệnh hằng
+ngày, chặn chúng là cách nhanh nhất để dev tháo guardrail. Guardrail chỉ hỏi khi
+**cả hai** điều kiện đúng: đích không có trong `declaredHosts`, VÀ lệnh **đẩy**
+dữ liệu ra (`scp ./x host:/y`, `rsync ./x host:/y`, `ssh host "..."`, `curl -X POST`
+/ `-d` / `-F` / `-T`). Tải-về không bị hỏi. Đo trên 24 lệnh thật hay gõ: 0 prompt.
+
+Điều đó cũng nghĩa là: `declaredHosts` rỗng thì nhóm B **không được hỏi gì**.
+`doctor` in ⚠ cho trạng thái đó.
 
 ## Escape
 
@@ -200,6 +246,27 @@ hớ hênh**; nó không phải hàng rào an ninh.
     `cat ~/.docker/./config.json` LỌT còn `cat ~/.docker/config.json` bị chặn,
     vì bước chuẩn hoá đường dẫn chưa giải `.` và `..`. Các mẫu dạng cây (`**`)
     không bị ảnh hưởng.
+18. **Mở Codex NGOÀI thư mục dự án thì đường script không được bảo vệ.**
+    `codex-guardrail.json` chỉ được đọc khi tìm được `.git` từ `cwd` mà Codex
+    gửi. Mở từ home thì policy dự án không bao giờ được đọc, nên `deploy.targets`
+    rỗng và nhóm `deploy` **không cưỡng chế gì** với script của dự án — đây là
+    chỗ một rule allow-list suy giảm ngược hướng với deny-list. Công cụ deploy
+    trực tiếp vẫn bị `infra` chặn (deny-list nằm ở bản mặc định). Guardrail bịt
+    một phần bằng `deploy.detectScripts` (chặn lệnh trông-như-deploy kèm message
+    "mở Codex từ thư mục dự án"), nhưng nó khớp theo TÊN file nên `redeploy.sh`
+    hay một tên riêng của dự án sẽ lọt. Cách chắc chắn duy nhất: **mở Codex TỪ
+    thư mục dự án**, rồi `guardrail doctor` sẽ báo `✓ Hook thật đọc được project
+    root`.
+19. **Danh sách trình thông dịch không thể đầy đủ.** `bash ./deploy.sh`,
+    `sh`, `zsh`, `source`, `.`, `pwsh` đều được bóc để lộ script thật, nhưng
+    `perl -e`, một wrapper tự viết trong repo, hay một tên shell khác vẫn gọi
+    được script mà không khớp entrypoint nào. Cùng bản chất với giới hạn #1.
+20. **`netlify` / `firebase` / `railway` bị chặn ở mức SUBCOMMAND, không mức
+    binary.** `netlify deploy` bị chặn còn `netlify dev` qua — chủ ý, vì chặn cả
+    binary sẽ biến một lệnh hằng ngày thành escape từng phiên đến hết đời dự án
+    (mảng trong bản mặc định không xoá được). Cái giá: một subcommand publish
+    mới hoặc đổi tên sẽ **lọt** cho tới khi có người thêm pattern, và `doctor`
+    không phát hiện được thiếu sót kiểu này.
 
 ## Phát triển
 

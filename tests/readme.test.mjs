@@ -61,3 +61,32 @@ test('README ghi mục giới hạn đã biết, gồm bốn mục đụng tới
   assert.match(section, /VỊ TRÍ/,
     'thiếu: bản ghi trust gắn với vị trí entry nên tool khác cài sau có thể vô hiệu hoá guardrail');
 });
+
+test('README ghi đủ giới hạn của nhóm deploy', () => {
+  const section = README.slice(README.indexOf('## Giới hạn đã biết'));
+  // Ba mục này là ba chỗ nhóm deploy KHÔNG bảo vệ được, và cả ba đều dễ bị hiểu
+  // ngược thành "đã bảo vệ". Kiểm bằng dấu vết không thể viết đúng mà thiếu nội
+  // dung, không bằng tiêu đề.
+  assert.match(section, /NGOÀI thư mục dự án/,
+    'thiếu: mở Codex ngoài thư mục dự án thì đường script không được bảo vệ');
+  assert.match(section, /trình thông dịch/,
+    'thiếu: danh sách trình thông dịch không thể đầy đủ');
+  assert.match(section, /SUBCOMMAND|subcommand/,
+    'thiếu: netlify/firebase/railway chặn theo subcommand nên subcommand mới sẽ lọt');
+});
+
+test('README nói rõ nhóm deploy là allow-list nên chưa khai thì không cưỡng chế', () => {
+  // Đây là chỗ dễ đọc ngược nhất: bốn nhóm kia bảo vệ ngay từ bản mặc định, nên
+  // dev sẽ mặc định cho rằng deploy cũng vậy.
+  assert.match(README, /allow-list/);
+  assert.match(README, /không cưỡng chế gì tới khi dự án khai/);
+});
+
+test('README KHÔNG hứa rằng confirm nhóm B chắc chắn hiện ra', () => {
+  // `ask` chưa từng được quan sát đi hết một vòng trong Codex. Tới khi đó, README
+  // được nói "thiết kế để hỏi", không được nói "sẽ hỏi".
+  const claims = README.match(/[^.\n]*confirm[^.\n]*/gi) ?? [];
+  for (const c of claims) {
+    assert.ok(!/\bsẽ (luôn )?hỏi\b/.test(c), `README hứa quá mức: "${c.trim()}"`);
+  }
+});
