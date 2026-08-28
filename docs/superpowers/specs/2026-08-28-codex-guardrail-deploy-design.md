@@ -126,9 +126,19 @@ Ngân sách độ trễ hiện tại: hook p95 **27.8ms**, ngân sách §13 spec
 
    Đo được: `ask` là giá trị hợp lệ của `permissionDecision` trong Codex 0.150.1 (`PreToolUsePermissionDecisionWire` có `ask`; `PreToolUseDecisionWire` có `approve|block|allow|deny`).
 
-   **NHƯNG:** mọi payload thật Task 0 bắt được đều có `"permission_mode": "bypassPermissions"`, và `lib/` hiện KHÔNG đọc trường đó. Nếu ở chế độ đó Codex tự duyệt `ask`, thì confirm âm thầm thành cho-qua — đúng lớp lỗi "trông như được bảo vệ mà không". Nên bắt buộc:
+   **Tập chế độ, đo dứt điểm** từ JSON Schema NHÚNG TRONG binary codex 0.150.1:
 
-   - `buildContext` phải đọc `permission_mode` vào ctx.
+   ```
+   "permission_mode": { "enum": ["default","acceptEdits","plan","dontAsk","bypassPermissions"] }
+   ```
+
+   Sự tồn tại của một chế độ tên đúng là **`dontAsk`**, TÁCH BIỆT với `bypassPermissions`, là bằng chứng mạnh rằng `ask` ĐƯỢC tôn trọng ở các chế độ khác — nếu không thì không cần một chế độ riêng để tắt nó.
+
+   **CẢNH BÁO VỀ MỘT KHẲNG ĐỊNH SAI ĐÃ TỪNG NẰM Ở ĐÂY:** bản trước của mục này viết "mọi payload THẬT Task 0 bắt được đều có `bypassPermissions`". Sai. Fixture trong `tests/fixtures/codex-events/` là **viết tay** — `session_id` là UUID giả `01a00000-0000-7000-...`, ledger không nhắc `permission_mode` lần nào, và thư mục dump của `spike/dump-hook.mjs` (`~/guardrail-spike/`) không tồn tại. Giá trị `bypassPermissions` trong fixture là thứ ai đó gõ vào test, KHÔNG phải số đo. **Chế độ thật của máy dev: chưa biết** — `~/.codex/config.toml` không khai `approval_policy` hay `sandbox_mode` nào nên Codex dùng mặc định của nó.
+
+   Đã làm để biết mà không phải dựng phiên spike: `buildContext` đọc `permission_mode` vào ctx và `dispatch` ghi nó vào audit log. Lần chạy bất kỳ tiếp theo trong Codex sẽ lộ chế độ thật, miễn phí. Bắt buộc còn lại:
+
+   - ~~`buildContext` phải đọc `permission_mode` vào ctx.~~ **XONG** — cộng ghi vào audit log.
    - Nhóm `deploy` chỉ phát `ask` khi mode KHÔNG phải chế độ bỏ qua quyền. Ở chế độ bỏ qua quyền, `ask` **hạ về `deny`** và dùng `requireHumanEscape` (§5.6) làm cửa duy nhất.
    - Chưa đo được hành vi thật của `ask` dưới `bypassPermissions` thì thiết kế phải GIẢ ĐỊNH nó không hỏi. Xem §11.4.
 
@@ -375,11 +385,13 @@ Ngoài các nguyên tắc đã có (§14 spec chính), nhóm này bắt buộc:
    - **Nhóm B — ĐÃ CHỐT 2026-08-28: KHÔNG chặn, mà HỎI.** `scp`, `rsync`, `ssh`, `curl`. Cơ chế ở §5.5b: chỉ hỏi khi đích chưa khai VÀ lệnh đẩy dữ liệu ra. Hai điều kiện đó giữ số prompt thấp, vì tải-về thường xuyên còn đẩy-lên hiếm.
 
 
-4. **`ask` có thật sự hỏi dưới `permission_mode: "bypassPermissions"` không?** ẨN SỐ CHẶN THIẾT KẾ, và mức nghiêm trọng đã TĂNG sau quyết định không chặn nhóm B: trước đây nó chỉ ảnh hưởng UX của confirm deploy; giờ nó quyết định nhóm B **có được bảo vệ hay không**. Nếu `ask` không hỏi và ta cũng không chặn, `scp`/`rsync`/`ssh`/`curl` tới host lạ là lỗ hoàn toàn hở. Mọi payload thật Task 0 bắt được đều ở chế độ đó. Cần một spike đúng kiểu Task 0: phát `permissionDecision: "ask"` từ hook, chạy lệnh thật trong Codex, xem có prompt hay tự chạy. Ba kết quả, ba thiết kế khác nhau:
+4. **`ask` có thật sự hỏi ở chế độ mà máy dev đang chạy không?** ẨN SỐ CHẶN THIẾT KẾ, và mức nghiêm trọng đã TĂNG sau quyết định không chặn nhóm B: trước đây nó chỉ ảnh hưởng UX của confirm deploy; giờ nó quyết định nhóm B **có được bảo vệ hay không**. Nếu `ask` không hỏi và ta cũng không chặn, `scp`/`rsync`/`ssh`/`curl` tới host lạ là lỗ hoàn toàn hở. Mọi payload thật Task 0 bắt được đều ở chế độ đó. Cần một spike đúng kiểu Task 0: phát `permissionDecision: "ask"` từ hook, chạy lệnh thật trong Codex, xem có prompt hay tự chạy. Ba kết quả, ba thiết kế khác nhau:
    - Có hỏi → `ask` là cơ chế chính, `requireHumanEscape` chỉ còn cho phiên không người trực.
    - Tự duyệt → `ask` VÔ DỤNG ở chế độ này; `requireHumanEscape` là cơ chế duy nhất, và phải ghi vào README rằng confirm không khả dụng khi chạy bypassPermissions.
    - Coi là hook lỗi → tuyệt đối không dùng `ask`, vì theo Task 0 hook lỗi = CHO LỆNH CHẠY.
 
    Cho tới khi đo, thiết kế giả định kết quả xấu nhất.
 
-5. **Tên chính xác của các chế độ `permission_mode`.** Chỉ thấy `bypassPermissions` trong payload thật. Cần biết đủ tập giá trị để phân biệt "chế độ có hỏi" với "chế độ bỏ qua" — hardcode một chuỗi rồi đoán phần còn lại là cách sinh ra lỗ im lặng.
+5. ~~Tên chính xác của các chế độ `permission_mode`.~~ **ĐÃ CHỐT 2026-08-28** từ JSON Schema nhúng trong binary: `default`, `acceptEdits`, `plan`, `dontAsk`, `bypassPermissions`. Xem §3.9.
+
+6. **Máy dev thật đang chạy chế độ nào?** Sẽ tự trả lời ở lần chạy tiếp theo, vì audit log giờ ghi `permissionMode`. Đây là điều kiện tiên quyết của #4: không biết chế độ thật thì không biết `ask` có ý nghĩa gì với team này.

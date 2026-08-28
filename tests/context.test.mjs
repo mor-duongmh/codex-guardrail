@@ -164,3 +164,31 @@ test('filesFromPatch bắt "Move to:" (cú pháp rename thật của apply_patch
   });
   assert.deepEqual(buildContext(payload, {}).patchFiles.sort(), ['src/new.ts', 'src/old.ts']);
 });
+
+// §3.9 của spec deploy yêu cầu ctx mang `permission_mode`: quyết định `ask` chỉ
+// đáng tin ở chế độ thật sự có người trả lời, nên rule phải thấy được chế độ để
+// hạ `ask` về `deny` khi cần.
+//
+// Enum đầy đủ lấy từ JSON Schema NHÚNG TRONG BINARY codex 0.150.1:
+//   ["default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"]
+// Dán cứng ở đây, không import: nếu Codex thêm chế độ mới thì test này không tự
+// đúng theo, và đó là điều mong muốn — chế độ lạ phải được xử tường minh.
+test('ctx mang permission_mode khi payload có', () => {
+  for (const mode of ['default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions']) {
+    const ctx = buildContext(JSON.stringify({
+      hook_event_name: 'PreToolUse', tool_name: 'Bash',
+      tool_input: { command: 'ls' }, cwd: '/tmp', permission_mode: mode,
+    }), {});
+    assert.equal(ctx.permissionMode, mode, `mất permission_mode cho ${mode}`);
+  }
+});
+
+// Thiếu trường thì để null, KHÔNG đoán 'default'. Đoán 'default' là đoán rằng
+// prompt sẽ hiện — tức lệch về phía CHO QUA ở đúng chỗ không được lệch.
+test('payload thiếu permission_mode thì để null, không đoán default', () => {
+  const ctx = buildContext(JSON.stringify({
+    hook_event_name: 'PreToolUse', tool_name: 'Bash',
+    tool_input: { command: 'ls' }, cwd: '/tmp',
+  }), {});
+  assert.equal(ctx.permissionMode, null);
+});

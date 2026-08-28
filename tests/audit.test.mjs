@@ -103,3 +103,30 @@ test('file cũ với chmod lỏng được tự chữa (POSIX only)', async () =
   const dirMode = dirStat.mode & parseInt('777', 8);
   assert.equal(dirMode, 0o700, `expected dir mode 0o700 after heal, got 0o${dirMode.toString(8)}`);
 });
+
+// Đây là phần biến một ẩn số thành số đo mà không cần phiên spike: chế độ quyền
+// thật của máy dev chỉ lộ ra khi Codex gửi payload. Ghi nó vào audit log thì lần
+// chạy bất kỳ tiếp theo là ta biết, không phải dựng sandbox và tốn token.
+//
+// Bối cảnh vì sao cần: fixture trong repo ghi "bypassPermissions", nhưng fixture
+// là VIẾT TAY (session_id là UUID giả 01a00000-...), nên giá trị đó KHÔNG phải số
+// đo. Chế độ thật chưa ai biết.
+test('audit ghi permissionMode khi ctx có', async () => {
+  const p = freshAudit();
+  const { record } = await import('../lib/audit.mjs');
+  record({ decision: 'denied', ruleId: 'infra.deny-binary', permissionMode: 'default' });
+  const e = JSON.parse(readFileSync(p, 'utf8').trim().split('\n').at(-1));
+  assert.equal(e.permissionMode, 'default');
+});
+
+// undefined KHÔNG được thành khoá trong log. JSON.stringify bỏ undefined nên đây
+// là hành vi sẵn có, nhưng ghim lại: một bản "tốt bụng" đổi sang `?? null` sẽ làm
+// mọi dòng log có `"permissionMode": null`, và lúc đó không phân biệt được
+// "Codex không gửi" với "Codex gửi null".
+test('permissionMode undefined thì không thành khoá trong log', async () => {
+  const p = freshAudit();
+  const { record } = await import('../lib/audit.mjs');
+  record({ decision: 'denied', ruleId: 'infra.deny-binary', permissionMode: undefined });
+  const e = JSON.parse(readFileSync(p, 'utf8').trim().split('\n').at(-1));
+  assert.ok(!('permissionMode' in e), 'không được ghi khoá với giá trị undefined');
+});
