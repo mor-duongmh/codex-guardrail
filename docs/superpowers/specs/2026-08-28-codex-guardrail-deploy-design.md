@@ -181,7 +181,27 @@ Ngân sách độ trễ hiện tại: hook p95 **27.8ms**, ngân sách §13 spec
 
 10. **Không có project root thì `deploy.*` CHẶN TẤT CẢ, và nói rõ vì sao.** Đo được ở §2.7: phiên thật không có project root, nên `deploy.targets` rỗng.
 
-    Điểm cốt yếu là một tính chất bất đối xứng đáng ghi thành nguyên tắc chung: **rule kiểu DENY-LIST suy giảm êm về mặc định; rule kiểu ALLOW-LIST suy giảm thành chặn tất cả.** `secrets` và `infra` vẫn bảo vệ tốt bằng danh sách mặc định vì chúng liệt kê cái BỊ CẤM. `deploy` liệt kê cái ĐƯỢC PHÉP, nên không có dữ liệu dự án nghĩa là không có đích nào được phép — mọi deploy bị chặn.
+    **SỬA 2026-08-28 — tuyên bố "chặn tất cả" ở trên là SAI, và đây là cách nó sai.** Tôi từng ghi nguyên tắc: *deny-list suy giảm êm, allow-list suy giảm thành chặn tất cả*. Nửa sau không đúng, vì một rule allow-list có HAI phần:
+
+    1. **cò súng** — "lệnh này thuộc loại được quản" (`deploy.entrypoints`)
+    2. **danh sách cho phép** — "giá trị nào hợp lệ" (`deploy.targets`)
+
+    Cả hai đều là dữ liệu dự án. Mất policy là mất luôn **cò súng**, nên không lệnh nào bị coi là deploy, và nhóm cưỡng chế **con số không** — không phải chặn tất cả. `./scripts/deploy.sh` chạy thẳng.
+
+    Nguyên tắc đúng: **allow-list suy giảm thành chặn tất cả CHỈ KHI cò súng nằm ở policy mặc định.** Nếu cò súng cũng là dữ liệu dự án thì nó suy giảm thành *không cưỡng chế gì* — hướng sai an toàn ngược lại hoàn toàn.
+
+    Trạng thái thật khi mở Codex từ home, tách theo hai đường deploy:
+
+    | Đường | Có được bảo vệ? | Vì sao |
+    |---|---|---|
+    | công cụ trực tiếp (`surge`, `netlify deploy`, `vercel --prod`…) | **có** | deny-list ở policy MẶC ĐỊNH (§6.0), không cần dữ liệu dự án |
+    | script của dự án (`./scripts/deploy.sh prod`) | **KHÔNG** | chỉ dự án biết tên script, và policy dự án không được đọc |
+
+    Nên nửa đầu nguyên tắc vẫn đúng và đang cứu chúng ta: `infra` deny-list giữ được đường thứ nhất. Lỗ là đường thứ hai.
+
+    **Cách bịt, và nó cần cò súng ở bản mặc định:** thêm `deploy.detectScripts` vào `policy/default.json` — glob theo TÊN script (`**/deploy*.sh`, `**/deploy*.ps1`, `**/publish*.sh`), khớp chỉ khi script đó là **lệnh đang được thi hành** (argv[0] sau khi bóc wrapper), không phải khi nó là tham số. Đây không phải danh sách tên công cụ (§3.1 vẫn giữ) mà là một phỏng đoán về tên file, và nó chỉ dẫn tới `deploy.no-project-root` — một message bảo "mở Codex từ thư mục dự án", không phải một quyết định về đích.
+
+    Bắt buộc đo trước khi nhận: `cat scripts/deploy.sh`, `vim deploy.sh`, `git diff scripts/deploy.sh`, `grep -rn deploy scripts/` đều phải qua. Nếu số đo cho thấy chặn oan, bỏ `detectScripts` và chấp nhận rằng đường thứ hai không bịt được — nhưng khi đó §9 #9 phải nói đúng là "không cưỡng chế gì", không được nói là "chặn tất cả".
 
     Ba lựa chọn, và lý do chọn cái thứ nhất:
 
@@ -263,7 +283,9 @@ Ba dạng đầu **đi vòng toàn bộ nhóm `deploy`**: không khớp entrypoi
 
 ### 5.1 `deploy.no-project-root` — `PreToolUse: Bash`
 
-Lệnh khớp một entrypoint (hoặc khớp `denyDirect`) nhưng `ctx.projectRoot` là null.
+`ctx.projectRoot` là null **và** lệnh trông như một lệnh deploy.
+
+Mệnh đề thứ hai là phần khó, và §3.10 giải thích vì sao: khi `projectRoot` null thì `deploy.entrypoints` rỗng, nên **không thể** dùng entrypoint làm cò súng — chính cò súng cũng đã mất. Cò súng phải nằm ở policy MẶC ĐỊNH: `deploy.detectScripts` (glob theo tên script) cộng phần `infra` đã chặn sẵn công cụ trực tiếp.
 
 Phải là ruleId RIÊNG, không dồn vào `deploy.undeclared-target`: nguyên nhân khác nhau thì hành động khác nhau, và message của `undeclared-target` sẽ chỉ người dùng sửa một file đang không được đọc.
 
@@ -505,7 +527,7 @@ Ngoài đường nóng, `doctor` resolve `name` của target trong `~/.ssh/confi
 
 8. **Nhóm B chuyển từ "hỏi" sang "chặn" trong phiên không người trực.** Hệ quả của §3.9: ở chế độ bỏ qua quyền hoặc phiên không có người, `scp`/`rsync`/`ssh`/`curl` đẩy dữ liệu tới host chưa khai sẽ bị CHẶN chứ không hỏi. Đúng hướng an toàn, nhưng nghĩa là một script CI dùng `rsync` tới host chưa khai sẽ vỡ — phải khai host đó, hoặc chạy ngoài Codex.
 
-9. **`deploy.*` vô hiệu hoàn toàn khi mở Codex ngoài thư mục dự án** (§2.7). Không phải "giảm bảo vệ" mà là "chặn tất cả": allow-list không có dữ liệu thì không có đích nào hợp lệ. Đó là hướng an toàn, nhưng nghĩa là thói quen mở Codex từ home làm nhóm này thành một bức tường thay vì một cổng — và team phải đổi thói quen, không phải guardrail nới ra.
+9. **Mở Codex ngoài thư mục dự án thì đường script KHÔNG được bảo vệ** (§2.7, §3.10). Đây là bản sửa của một câu sai tôi từng viết ("chặn tất cả"): cò súng của nhóm cũng là dữ liệu dự án, nên mất policy là nhóm cưỡng chế **con số không**, không phải chặn hết. Công cụ deploy trực tiếp vẫn bị `infra` chặn vì deny-list nằm ở bản mặc định; `./scripts/deploy.sh prod` thì chạy thẳng. `deploy.detectScripts` (§3.10) bịt được nếu số đo cho phép — chưa đo thì không được tuyên bố là đã bịt. Thứ chắc chắn có tác dụng vẫn là đổi thói quen: mở Codex TỪ thư mục dự án.
 
 10. **Gọi entrypoint qua trình thông dịch đi vòng cả nhóm.** `bash ./deploy.sh prod` / `sh ...` / `source ...` không khớp entrypoint nào (đo ở §5.0.1). §5.0.1 bịt ba dạng đó bằng cách thêm chúng vào `WRAPPERS`, nhưng danh sách trình thông dịch **không thể đầy đủ** — `perl -e`, `python -c`, một wrapper tự viết trong repo đều gọi được script mà không khớp tiền tố nào. Cùng bản chất với §15 #4 spec chính: tầng 1 chặn đường mặc định, không chặn người quyết tâm.
 
