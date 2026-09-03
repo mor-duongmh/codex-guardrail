@@ -207,3 +207,15 @@ test('khai entrypoint mà thiếu targets thì notes phải cảnh báo chặn 1
   assert.ok(notes.some(n => /MỌI lệnh deploy/.test(n)),
     'trạng thái khai-nửa-vời phải hiện khác trạng thái chưa-khai');
 });
+
+// --- A3: không hướng dẫn gọi subcommand chưa tồn tại -----------------------
+// `bin/guardrail.mjs` không có nhánh `ci` (đo: `guardrail ci` in USAGE và thoát
+// 1). In nó ra như một BƯỚC CẦN LÀM là dạy mọi dev thêm một bước CI luôn đỏ,
+// rồi họ học cách bỏ qua hướng dẫn của init. Tầng 2 chưa có thì phải nói là
+// chưa có — và nói luôn hệ quả: tầng 3 đang là tầng duy nhất còn lại.
+test('không bảo dev thêm bước gọi `guardrail ci`', () => {
+  const out = initProject({ cwd: repo(), runGit: git({}) }).lines.join('\n');
+  assert.ok(!/[Tt]hêm bước gọi/.test(out), out);
+  assert.ok(/tầng 2/i.test(out) && /(chưa có|CHƯA)/.test(out),
+    `phải nói rõ tầng 2 chưa có: ${out}`);
+});

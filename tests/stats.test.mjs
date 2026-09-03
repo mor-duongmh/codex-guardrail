@@ -67,7 +67,7 @@ test('formatStats in đủ ruleId và số đếm', () => {
   assert.ok(out.includes('git.protected-branch'));
   assert.ok(out.includes('Tổng 4 lần ghi'));
   const row = out.split('\n').find(l => l.startsWith('infra.deny-binary'));
-  assert.match(row, /^infra\.deny-binary\s+2\s+1$/);
+  assert.match(row, /^infra\.deny-binary\s+2\s+0\s+1$/);
 });
 
 test('cột rule rộng theo ruleId dài nhất, không cắt tên', () => {
@@ -119,4 +119,49 @@ test('CLI stats bỏ qua dòng hỏng chứ không chết', () => {
   const res = runStats(p);
   assert.equal(res.status, 0);
   assert.ok(res.stdout.includes('Tổng 2 lần ghi'));
+});
+
+// --- A1: `asked` là decision thứ ba --------------------------------------
+// `dispatch` ghi `decision: 'asked'` từ khi nhóm deploy có nhánh xin xác nhận
+// (lib/dispatch.mjs), nhưng `summarize` chỉ biết 'escaped' và dồn phần còn lại
+// vào `denied`. Đếm sai là một chuyện; chuyện nặng hơn là chú thích dưới bảng
+// khuyên "rule chặn oan nhiều thì nới trong codex-guardrail.json" — nên một
+// rule chỉ HỎI (dev bấm OK, lệnh chạy bình thường) sẽ đẩy lead đi nới đúng cái
+// rule đang làm việc đúng.
+test('đếm riêng asked, không dồn vào denied', () => {
+  const rows = summarize([
+    { decision: 'asked', ruleId: 'deploy.push-undeclared-host' },
+    { decision: 'asked', ruleId: 'deploy.push-undeclared-host' },
+    { decision: 'denied', ruleId: 'deploy.push-undeclared-host' },
+  ]).rows;
+  assert.equal(rows[0].asked, 2);
+  assert.equal(rows[0].denied, 1);
+});
+
+// Decision LẠ vẫn phải rơi vào `denied`, không được đánh rơi: tổng là con số
+// người ta dùng để tin hay không tin bảng này (cùng lý do như dòng thiếu
+// ruleId). Nếu Codex/guardrail sinh decision mới thì bảng lệch, chứ không mất.
+test('decision lạ vẫn được đếm, rơi vào denied', () => {
+  const { rows, total } = summarize([{ decision: 'chua-co-ten', ruleId: 'x' }]);
+  assert.equal(total, 1);
+  assert.equal(rows[0].denied, 1);
+});
+
+test('asked xếp theo TỔNG như escaped', () => {
+  const rows = summarize([
+    { decision: 'denied', ruleId: 'it' },
+    { decision: 'asked', ruleId: 'nhieu' },
+    { decision: 'asked', ruleId: 'nhieu' },
+  ]).rows;
+  assert.equal(rows[0].ruleId, 'nhieu');
+});
+
+test('formatStats có cột hỏi riêng và nói rõ hỏi không phải chặn', () => {
+  const out = formatStats(summarize([
+    { decision: 'asked', ruleId: 'deploy.push-undeclared-host' },
+  ]));
+  assert.match(out.split('\n')[0], /chặn\s+hỏi\s+escape/);
+  const row = out.split('\n').find(l => l.startsWith('deploy.'));
+  assert.match(row, /^deploy\.push-undeclared-host\s+0\s+1\s+0$/);
+  assert.ok(/hỏi[\s\S]*KHÔNG phải chặn oan/.test(out), out);
 });

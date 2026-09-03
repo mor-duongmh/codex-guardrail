@@ -138,3 +138,31 @@ test('win32: đường dẫn native tới credential chuẩn hoá về dạng kh
   assert.ok(re.test(normalizePath(argv[1], home)),
     `không khớp: ${normalizePath(argv[1], home)} vs ${re.source}`);
 });
+
+// --- A2: cụm cờ ngắn mang thân lệnh ---------------------------------------
+// `argv.indexOf('-c')` khớp TUYỆT ĐỐI nên mọi dạng cụm đều lọt. Đo trước khi
+// sửa: `bash -c "aws s3 ls"` bị chặn còn `bash -lc "aws s3 ls"` ĐI VÒNG toàn bộ
+// deny-list. `-lc` không phải dạng lách hiếm — nó là dạng chuẩn khi cần shell
+// login (và `-ic` khi cần interactive).
+test('giải thân lệnh trong cụm cờ ngắn', () => {
+  for (const cmd of ['bash -lc "psql -l"', 'zsh -ic "psql -l"',
+                     'bash -euxc "psql -l"', 'sh -exc "psql -l"',
+                     'bash -cl "psql -l"']) {
+    assert.ok(bins(cmd).includes('psql'), cmd);
+  }
+});
+
+// Chữ `c` phải là chữ THƯỜNG: `-C` của bash là noclobber, token sau nó là TÊN
+// FILE script chứ không phải thân lệnh. Bóc nó ra rồi parse như một lệnh là
+// sinh segment giả, tức mở đường chặn oan.
+test('cụm cờ không có c thường thì không bóc thân lệnh', () => {
+  const segs = parseCommand('bash -C "psql -l"', 0, 'darwin');
+  assert.equal(segs.length, 1, JSON.stringify(segs));
+  assert.ok(!bins('bash -C "psql -l"').includes('psql'));
+});
+
+// Cụm khác đứng TRƯỚC `-c` thật: cách "lấy cụm khớp đầu tiên" sẽ bóc sai token
+// và bỏ lọt đúng thân lệnh cần soi. Phải soi MỌI cụm khớp.
+test('vẫn bóc được thân lệnh khi có cụm cờ khác đứng trước', () => {
+  assert.ok(bins('bash -abc -c "psql -l"').includes('psql'));
+});
