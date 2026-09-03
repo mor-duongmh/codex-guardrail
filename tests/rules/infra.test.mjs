@@ -436,3 +436,20 @@ test('ranh giới subcommand: deploying không phải deploy', () => {
   assert.equal(evaluate(shell('grep -rn "netlify deploy" docs/'), P).decision, 'allow');
   assert.equal(evaluate(shell('echo firebase deploy'), P).decision, 'allow');
 });
+
+// --- A2 + A4: chứng minh ở TẦNG RULE, không chỉ ở tầng bóc tách -----------
+// Hai test dưới đây là lý do duy nhất để sửa tokenize.mjs và argv.mjs: cả 7
+// dạng này đều ĐI VÒNG denyBinaries trước khi sửa (đo bằng runHook thật).
+test('cụm cờ shell không đi vòng được denyBinaries', () => {
+  for (const cmd of ['bash -lc "aws s3 ls"', 'zsh -ic "psql -l"',
+                     'bash -euxc "kubectl get pods"']) {
+    assert.equal(evaluate(shell(cmd), P).decision, 'deny', cmd);
+  }
+});
+
+test('wrapper chạy-lệnh không đi vòng được denyBinaries', () => {
+  for (const cmd of ['xargs aws s3 ls', 'timeout 5 aws s3 ls', 'nohup aws s3 ls',
+                     'exec aws s3 ls', 'stdbuf -o0 aws s3 ls', 'watch -n 5 aws s3 ls']) {
+    assert.equal(evaluate(shell(cmd), P).decision, 'deny', cmd);
+  }
+});

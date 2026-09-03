@@ -169,7 +169,9 @@ người quyết định.
 | Loại rule mới | Thêm module vào `lib/rules/`, đăng ký vào `lib/dispatch.mjs` |
 
 `guardrail stats` tổng hợp audit log: rule nào chặn oan nhiều nhất (nên nới) và
-rule nào chưa bắn lần nào (nên bỏ cho gọn). Cố ý **không** có cơ chế rule tự nới
+rule nào chưa bắn lần nào (nên bỏ cho gọn). Cột `hỏi` đếm riêng số lần guardrail
+xin xác nhận — dev bấm OK là lệnh chạy, nên **đừng nới policy vì con số ở cột
+đó**: nó là rule đang làm đúng việc, không phải rule chặn oan. Cố ý **không** có cơ chế rule tự nới
 — guardrail tự nới sẽ mất tác dụng đúng lúc cần nhất, và bên bị chặn lại chính
 là bên có động cơ nới.
 
@@ -257,10 +259,13 @@ hớ hênh**; nó không phải hàng rào an ninh.
     hay một tên riêng của dự án sẽ lọt. Cách chắc chắn duy nhất: **mở Codex TỪ
     thư mục dự án**, rồi `guardrail doctor` sẽ báo `✓ Hook thật đọc được project
     root`.
-19. **Danh sách trình thông dịch không thể đầy đủ.** `bash ./deploy.sh`,
-    `sh`, `zsh`, `source`, `.`, `pwsh` đều được bóc để lộ script thật, nhưng
-    `perl -e`, một wrapper tự viết trong repo, hay một tên shell khác vẫn gọi
-    được script mà không khớp entrypoint nào. Cùng bản chất với giới hạn #1.
+19. **Danh sách trình thông dịch và wrapper không thể đầy đủ.**
+    `bash ./deploy.sh`, `sh`, `zsh`, `source`, `.`, `pwsh` đều được bóc để lộ
+    script thật, và `sudo`, `env`, `npx`, `nice`, `time`, `xargs`, `timeout`,
+    `nohup`, `exec`, `stdbuf`, `watch` cũng vậy. Nhưng `perl -e`, một wrapper tự
+    viết trong repo, hay một tên shell khác vẫn gọi được script mà không khớp
+    entrypoint nào. Cùng bản chất với giới hạn #1: danh sách này chỉ dài ra được
+    khi có người thêm, và `doctor` không phát hiện được thiếu sót kiểu đó.
 20. **`netlify` / `firebase` / `railway` bị chặn ở mức SUBCOMMAND, không mức
     binary.** `netlify deploy` bị chặn còn `netlify dev` qua — chủ ý, vì chặn cả
     binary sẽ biến một lệnh hằng ngày thành escape từng phiên đến hết đời dự án
