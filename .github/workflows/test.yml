@@ -59,12 +59,31 @@ jobs:
           # tiền cho HAI lần tạo process (node, rồi `git` để lấy branch cho audit).
           # KHÔNG xoá test độ trễ, chỉ nới ngưỡng.
           GUARDRAIL_LATENCY_BUDGET_MS: ${{ matrix.os == 'windows-latest' && 500 || 250 }}
-          # Ngưỡng PHẦN DÔI thì Linux/macOS dùng nguyên mặc định của test: phần
-          # dôi được so với baseline đo cùng lúc trên cùng máy, nên nó đã tự bù
-          # cho runner chậm — không có lý do nới. Chỉ Windows được nới 2x, vì ở
-          # đó tạo process đắt hơn Unix nhiều và đường deny trả tiền cho hai lần
-          # tạo process, mà chưa ai đo con số thật trên runner Windows.
-          # Test tự in dòng `p95: ...` mỗi lần chạy, kể cả khi xanh — đọc số ở
-          # lần chạy xanh đầu tiên của ô Windows rồi bỏ hai dòng dưới đi.
-          GUARDRAIL_LATENCY_ALLOW_OVERHEAD_MS: ${{ matrix.os == 'windows-latest' && 120 || 60 }}
+          # Ngưỡng PHẦN DÔI: allow và deny dùng CHUNG một con số cho mỗi OS.
+          #
+          # Bản trước cho allow 60 và deny 150 với lập luận "phần dôi so với
+          # baseline đo cùng lúc trên cùng máy nên đã tự bù cho runner chậm".
+          # Số đo đã phản chứng lập luận đó. Cùng ô macos-latest/24, cùng commit,
+          # rerun không đổi một dòng code: baseline gần như y nguyên (40.0ms rồi
+          # 42.0ms) nhưng allow p95 nhảy 109.1ms xuống 46.2ms, tức phần dôi đi từ
+          # 69.1ms xuống 4.2ms — trải 16 lần. Trừ một baseline ỔN ĐỊNH không bù
+          # được nhiễu ở phía BỊ ĐO: cơ chế tự bù chỉ xử lý runner chậm BỀN, còn
+          # gai nhất thời trên runner dùng chung thì p95 với n=40 vẫn ăn.
+          #
+          # Và chỗ sai gốc không phải con số 60 mà là hình dạng: đường allow RẺ
+          # HƠN đường deny (đo trong một run: dôi allow 19-34ms trên
+          # ubuntu/macos, 27-82ms trên windows; dôi deny 26-102ms) nhưng lại bị
+          # cho ngân sách CHẶT HƠN 2.5 lần. Đường rẻ hơn phải đỏ trước — đúng
+          # như đã xảy ra. Cho hai đường cùng ngân sách theo OS thì bất đối xứng
+          # đó mất, và không còn con số nào phải nhớ lý do riêng.
+          #
+          # Ngân sách này vẫn bắt được hồi quy thật: nó đo PHẦN DÔI của
+          # guardrail, và một hồi quy đáng chặn merge là hồi quy BỀN, hiện trên
+          # mọi ô — không phải một ô đỏ một mình. Dôi xấu nhất từng đo là 82.5ms
+          # (windows-latest/20), nên 150/300 để lại 1.8x/3.6x khoảng dư.
+          #
+          # Test tự in dòng `p95: ...` mỗi lần chạy, kể cả khi xanh. Nếu một ô
+          # đỏ vì hai dòng dưới, ĐỌC SỐ trước khi nới tiếp: dôi nhảy một mình ở
+          # một ô là nhiễu, dôi phình ở CẢ CHÍN ô mới là hồi quy.
+          GUARDRAIL_LATENCY_ALLOW_OVERHEAD_MS: ${{ matrix.os == 'windows-latest' && 300 || 150 }}
           GUARDRAIL_LATENCY_DENY_OVERHEAD_MS: ${{ matrix.os == 'windows-latest' && 300 || 150 }}
