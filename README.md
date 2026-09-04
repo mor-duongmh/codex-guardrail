@@ -272,6 +272,15 @@ hớ hênh**; nó không phải hàng rào an ninh.
     (mảng trong bản mặc định không xoá được). Cái giá: một subcommand publish
     mới hoặc đổi tên sẽ **lọt** cho tới khi có người thêm pattern, và `doctor`
     không phát hiện được thiếu sót kiểu này.
+21. **Gán biến môi trường mang đường dẫn secret thì cố ý cho qua.** Đo được
+    2026-09-04: đường dẫn nằm CHUNG token với cờ trước đây lọt hết —
+    `dd if=.env of=/tmp/leak`, `grep --file=.env x`, `tar --file=.env -c` đều
+    được cho qua vì vòng quét so cả token `if=.env` với pattern. Nay đã chặn.
+    Nhưng hai dạng vẫn cho qua **có chủ ý**: gán biến môi trường
+    (`ENV_FILE=.env npm start`) vì bản thân nó không đọc file và đó là workflow
+    dotenv thật; và cờ bảo vệ `--exclude=.env` / `--ignore=.env` vì đó là lệnh
+    đang **tránh** secret — chặn nó là dạy dev tắt guardrail. Chương trình được
+    gọi có đọc file đó hay không thì rule không thấy, cùng trần với mục 2.
 
 ## Phát triển
 
