@@ -560,3 +560,37 @@ test('bóc dấu nhóm không chặn oan file được miễn', () => {
     assert.equal(evaluate(shell(cmd), P).decision, 'allow', `ca: ${cmd}`);
   }
 });
+
+// Đo 2026-09-04: đường dẫn nằm CHUNG token với cờ thì vòng quét token không
+// thấy, nên `dd if=.env of=/tmp/leak`, `grep --file=.env x`, `tar --file=.env -c`
+// đều LỌT. Cùng cái bẫy như dấu nhóm đã ghi ở lib/rules/secrets.mjs: pattern
+// CÂY (`~/.aws/**`) vẫn chặn được vì `**` hút cả tiền tố `if=`, nên chỉ pattern
+// tên file CHÍNH XÁC hở — dễ tin là đã an toàn.
+test('chặn đường dẫn nhạy cảm nằm chung token với cờ', () => {
+  for (const cmd of [
+    'dd if=.env',
+    'dd if=.env of=/tmp/leak',
+    'grep --file=.env x',
+    'tar --file=.env -c',
+    'dd if=certs/server.pem',
+  ]) {
+    assert.equal(evaluate(shell(cmd), P).ruleId, 'secrets.read-path', cmd);
+  }
+});
+
+// Chiều ngược, để bản vá không mua an toàn bằng chặn oan:
+// - `--exclude=.env` là lệnh BẢO VỆ, chặn nó là dạy dev tắt guardrail.
+// - gán biến môi trường không tự đọc file, và `ENV_FILE=.env npm start` là
+//   workflow dotenv thật. Nó là lỗ có chủ ý, ghi vào README.
+// - allowPaths vẫn phải cứu được khi đường dẫn nằm trong token cờ.
+test('không chặn oan cờ bảo vệ, gán biến môi trường, hay allowPaths', () => {
+  for (const cmd of [
+    'tar --exclude=.env -c .',
+    'rsync --exclude=.env src dst',
+    'ENV_FILE=.env npm start',
+    'dd if=.env.example',
+    'grep --file=.env.example x',
+  ]) {
+    assert.equal(evaluate(shell(cmd), P).decision, 'allow', cmd);
+  }
+});

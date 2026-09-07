@@ -62,6 +62,16 @@ test('README ghi mục giới hạn đã biết, gồm bốn mục đụng tới
     'thiếu: bản ghi trust gắn với vị trí entry nên tool khác cài sau có thể vô hiệu hoá guardrail');
 });
 
+test('README ghi lỗ cố ý để lại ở đường dẫn nằm chung token với cờ', () => {
+  const section = README.slice(README.indexOf('## Giới hạn đã biết'));
+  // Bản vá 2026-09-04 chặn `dd if=.env` / `--file=.env`, nhưng CỐ Ý cho qua gán
+  // biến môi trường và cờ bảo vệ. Hai chỗ đó là quyết định, không phải sơ sót,
+  // nên README phải nói ra — nếu không, người sau sẽ "vá cho kín" và chặn oan
+  // workflow dotenv. Kiểm bằng dấu vết không thể viết đúng mà thiếu nội dung.
+  assert.match(section, /ENV_FILE=/, 'thiếu: gán biến môi trường cố ý cho qua');
+  assert.match(section, /--exclude=/, 'thiếu: cờ bảo vệ cố ý cho qua');
+});
+
 test('README ghi đủ giới hạn của nhóm deploy', () => {
   const section = README.slice(README.indexOf('## Giới hạn đã biết'));
   // Ba mục này là ba chỗ nhóm deploy KHÔNG bảo vệ được, và cả ba đều dễ bị hiểu

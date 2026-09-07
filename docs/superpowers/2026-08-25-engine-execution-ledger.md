@@ -531,3 +531,25 @@ Entry này ở 04:31, sau mọi probe cục bộ của tôi (muộn nhất 03:34
 e2e/confirmed: bản ghi trust ĐÃ ĐỔI HASH — trước grant là `a0ceb2441c6f…`/`1883537e7a7a…` (rác từ hook cũ), sau grant là `e84f23935063…`/`130079cc9805…`. Xác nhận dứt điểm hai điều: (a) bản ghi cũ đúng là rác như doctor đã từ chối tin, (b) Codex ghi lại hash khi grant.
 e2e/confirmed: **HỢP ĐỒNG HOOK CỦA TASK 0 VẪN ĐÚNG TRÊN codex-cli 0.150.1.** Đây là rủi ro tôi đã nêu khi phát hiện cask nhảy 0.130.0 -> 0.150.1: deny qua JSON trên stdout + exit 0 vẫn được tôn trọng, tool `Bash` vẫn đúng tên, và lệnh bị chặn thật chứ không chỉ cảnh báo. Không cần spike đo lại hợp đồng.
 e2e/confirmed: chuỗi đủ 6 mắt: install merge hooks.json -> /hooks liệt kê (sau khi sửa cách nhận diện) -> grant trust đổi hash -> Codex gọi hook trên tool call thật -> guardrail deny -> audit log ghi lại. Tầng 1 của thiết kế ba tầng đã cưỡng chế được trên máy thật.
+
+---
+
+**Ruling #87 — đường dẫn nằm chung token với cờ thì vòng quét token không thấy (2026-09-04).**
+Phát hiện khi đo giới hạn #6 của claude-guardrail: ở đó `dd if=.env` lọt. Kiểm chéo sang engine
+này thì lọt rộng hơn — `dd if=.env of=/tmp/leak`, `grep --file=.env x`, `tar --file=.env -c` đều
+allow, trong khi `openssl enc -in .env` (đường dẫn là token riêng) và `dd if=$HOME/.ssh/id_rsa`
+(pattern cây `**` hút cả tiền tố) thì deny. Đối chứng hai chiều: `npm test`->allow, `psql -l`->deny.
+Nguyên nhân: vòng lặp ở lib/rules/secrets.mjs so CẢ token `if=.env` với pattern, nên chỉ pattern
+tên file CHÍNH XÁC (`**/.env`) hở — ĐÚNG cái bẫy mà comment về dấu nhóm ngay trên nó đã ghi, chỉ
+khác nguồn. Comment đó đã cảnh báo hình dạng lỗi này mà không ai nối sang trường hợp cờ.
+Ruling: bóc phần sau `=` của token và kiểm như một đường dẫn. Bóc cho token bắt đầu bằng `-`
+(cờ dài GNU, nhận ra được bằng hình dạng) và enumerate `if=`/`of=` (cú pháp operand riêng của
+`dd`, không có dấu gạch nên không nhận ra được bằng hình dạng).
+KHÔNG bóc hai chỗ, có chủ ý: `--exclude=`/`--ignore=` là cờ ĐANG TRÁNH secret, chặn nó là dạy dev
+tắt guardrail; và gán biến môi trường (`ENV_FILE=.env npm start`) không tự đọc file, chặn nó là
+chặn oan workflow dotenv thật. Ghi thành giới hạn README #21 kèm test ghim nội dung, để người sau
+không "vá cho kín".
+Đột biến 4 đòn, cả hai chiều: hẹp lại nhánh cờ dài -> BẮT; bỏ enumerate if=/of= -> BẮT; bóc MỌI
+token có `=` (quá rộng) -> BẮT bởi test chống chặn oan; bỏ kiểm allowPaths ở nhánh mới -> BẮT.
+Xác minh đầu-cuối qua runHook, 10 lệnh khớp hết. 487/487.
+Cost nếu sai: `dd if=.env of=<đích>` là một đường đọc VÀ mang secret ra ngoài trong một lệnh.
